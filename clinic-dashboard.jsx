@@ -55,6 +55,9 @@ const fromDbVisit = (r) => r ? ({
   weight:r.weight, height:r.height,
   drugs: Array.isArray(r.drugs) ? r.drugs : (r.drugs ? JSON.parse(r.drugs) : []),
   services: Array.isArray(r.services) ? r.services : (r.services ? JSON.parse(r.services) : []),
+  // status: 'รอตรวจ' | 'ตรวจเสร็จ' — legacy rows without status treated as done
+  status: r.status || (r.dx || r.pe ? 'ตรวจเสร็จ' : 'รอตรวจ'),
+  queueNo: r.queue_no || '',
 }) : null;
 
 const toDbVisit = (v) => ({
@@ -63,6 +66,8 @@ const toDbVisit = (v) => ({
   bp:v.bp||'', pr:v.pr||'', rr:v.rr||'', temp:v.temp||'', o2:v.o2||'',
   weight:v.weight||'', height:v.height||'',
   drugs: v.drugs||[], services: v.services||[],
+  status: v.status || 'รอตรวจ',
+  queue_no: v.queueNo || '',
 });
 
 const fromDbReceipt = (r) => r ? ({
@@ -223,7 +228,7 @@ const doPrint = (elementId, title='') => {
 
 // ===================== INITIAL DATA =====================
 const CLINIC_NAME = "คลินิกเวชกรรมแพทย์ณัฐดนัย";
-const CLINIC_ADDRESS = "เลขที่ 123 ถนนสายหลัก ตำบลเวียง อำเภอเชียงแสน จังหวัดเชียงราย 57150";
+const CLINIC_ADDRESS = "101/2 หมู่ที่ 12 ตำบลป่งผาย อำเภอแม่สาย จังหวัดเชียงราย 57130 ประเทศไทย";
 const CLINIC_TEL = "053-777-XXX";
 const DOCTOR_NAME = "นายแพทย์ณัฐดนัย มะลิวัน";
 const DOCTOR_TITLE = "แพทย์เฉพาะทางเวชศาสตร์ครอบครัว";
@@ -928,6 +933,26 @@ function PatientDetail({pat,visits,onBack,patients,savePatient,treatmentServices
   const age = (dob)=>{if(!dob)return '-';const d=new Date()-new Date(dob);return Math.floor(d/(365.25*24*60*60*1000))+' ปี';};
   const save=async()=>{await savePatient(form);setEditing(false);alert('บันทึกข้อมูลเรียบร้อย');};
 
+  // ── Visit pagination & inline edit
+  const VISITS_PER_PAGE = 3;
+  const [visitPage, setVisitPage] = useState(1);
+  const [editingVisit, setEditingVisit] = useState(null); // visit being edited inline
+  const [editVform, setEditVform] = useState(null);
+
+  // Sort newest-first
+  const sortedVisits = [...visits].sort((a,b)=>(b.date||'').localeCompare(a.date||'')||(b.id||'').localeCompare(a.id||''));
+  const totalVisitPages = Math.max(1, Math.ceil(sortedVisits.length / VISITS_PER_PAGE));
+  const pagedVisits = sortedVisits.slice((visitPage-1)*VISITS_PER_PAGE, visitPage*VISITS_PER_PAGE);
+
+  const startEditVisit = (v) => { setEditingVisit(v.id); setEditVform({...v}); };
+  const cancelEditVisit = () => { setEditingVisit(null); setEditVform(null); };
+  const saveEditVisit = async () => {
+    if(!saveVisit){alert('ไม่สามารถบันทึกได้');return;}
+    await saveVisit(editVform);
+    alert('✅ บันทึกการแก้ไขเรียบร้อย');
+    setEditingVisit(null); setEditVform(null);
+  };
+
   // Count how many queues this patient already has today, to assign next sequence number
   const todayStr = today();
   const todaysVisitsForPat = (allVisits||visits).filter(v=>v.hn===pat.hn && v.date===todayStr);
@@ -1048,20 +1073,65 @@ function PatientDetail({pat,visits,onBack,patients,savePatient,treatmentServices
       )}
       {tab==='visits' && (
         <div>
-          {visits.length===0&&<div className="card" style={{textAlign:'center',color:'var(--gray)',padding:30}}>ยังไม่มีประวัติการรักษา</div>}
-          {visits.map(v=>(
-            <div key={v.id} className="card" style={{marginBottom:12}} id={`visit-card-${v.id}`}>
-              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10}}>
-                <div>
-                  <span style={{fontWeight:700,color:'var(--primary)',fontSize:14}}>Visit: {v.id}</span>
-                  <span style={{marginLeft:10,color:'var(--gray)',fontSize:13}}>{thaiDate(v.date)}</span>
-                  {!v.dx&&!v.pe&&v.date===today()&&<span className="tag tag-orange" style={{marginLeft:8}}>รอตรวจ</span>}
-                </div>
-                <button className="btn btn-print btn-sm no-print" onClick={()=>doPrint(`visit-card-${v.id}`,'บันทึกการตรวจ Visit '+v.id)}>🖨️ พิมพ์</button>
+          {sortedVisits.length===0&&<div className="card" style={{textAlign:'center',color:'var(--gray)',padding:30}}>ยังไม่มีประวัติการรักษา</div>}
+
+          {/* Pagination controls — top */}
+          {sortedVisits.length>0&&(
+            <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:12,flexWrap:'wrap',gap:8}}>
+              <div style={{fontSize:13,color:'var(--gray-dark)',fontWeight:600}}>
+                ประวัติการรักษา <span style={{color:'var(--primary)'}}>({sortedVisits.length} ครั้ง)</span>
+                <span style={{marginLeft:10,fontSize:12,color:'var(--gray)'}}>หน้า {visitPage}/{totalVisitPages}</span>
               </div>
-              <VisitRecord v={v} pat={pat} readOnly treatmentServices={treatmentServices} />
+              <div style={{display:'flex',gap:6}}>
+                <button className="btn btn-sm btn-outline" disabled={visitPage<=1} onClick={()=>setVisitPage(p=>Math.max(1,p-1))} style={{opacity:visitPage<=1?0.4:1}}>← ก่อนหน้า</button>
+                {Array.from({length:totalVisitPages},(_,i)=>(
+                  <button key={i} className={`btn btn-sm ${visitPage===i+1?'btn-primary':'btn-outline'}`} onClick={()=>setVisitPage(i+1)}>{i+1}</button>
+                ))}
+                <button className="btn btn-sm btn-outline" disabled={visitPage>=totalVisitPages} onClick={()=>setVisitPage(p=>Math.min(totalVisitPages,p+1))} style={{opacity:visitPage>=totalVisitPages?0.4:1}}>ถัดไป →</button>
+              </div>
+            </div>
+          )}
+
+          {pagedVisits.map(v=>(
+            <div key={v.id} className="card" style={{marginBottom:12}} id={`visit-card-${v.id}`}>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8,flexWrap:'wrap',gap:6}}>
+                <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
+                  <span style={{fontWeight:700,color:'var(--primary)',fontSize:14}}>Visit: {v.id}</span>
+                  {v.queueNo&&<span style={{background:'var(--primary)',color:'#fff',borderRadius:20,padding:'1px 10px',fontSize:11,fontWeight:700}}>คิว {v.queueNo}</span>}
+                  <span style={{color:'var(--gray)',fontSize:13}}>{thaiDate(v.date)}</span>
+                  {v.status==='รอตรวจ'&&<span className="tag tag-orange">รอตรวจ</span>}
+                  {v.status==='ตรวจเสร็จ'&&<span className="tag tag-green">ตรวจเสร็จ</span>}
+                  {!v.status&&!v.dx&&!v.pe&&v.date===today()&&<span className="tag tag-orange">รอตรวจ</span>}
+                </div>
+                <div style={{display:'flex',gap:6}}>
+                  {saveVisit&&(
+                    editingVisit===v.id
+                      ? <>
+                          <button className="btn btn-gray btn-sm no-print" onClick={cancelEditVisit}>ยกเลิก</button>
+                          <button className="btn btn-accent btn-sm no-print" onClick={saveEditVisit}>💾 บันทึก</button>
+                        </>
+                      : <button className="btn btn-outline btn-sm no-print" onClick={()=>startEditVisit(v)}>✏️ แก้ไข</button>
+                  )}
+                  <button className="btn btn-print btn-sm no-print" onClick={()=>doPrint(`visit-card-${v.id}`,'บันทึกการตรวจ Visit '+v.id)}>🖨️ พิมพ์</button>
+                </div>
+              </div>
+              {editingVisit===v.id && editVform
+                ? <VisitRecord v={editVform} setV={setEditVform} pat={pat} readOnly={false} treatmentServices={treatmentServices} />
+                : <VisitRecord v={v} pat={pat} readOnly treatmentServices={treatmentServices} />
+              }
             </div>
           ))}
+
+          {/* Pagination controls — bottom */}
+          {totalVisitPages>1&&(
+            <div style={{display:'flex',justifyContent:'center',gap:6,marginTop:8}}>
+              <button className="btn btn-sm btn-outline" disabled={visitPage<=1} onClick={()=>setVisitPage(p=>Math.max(1,p-1))} style={{opacity:visitPage<=1?0.4:1}}>← ก่อนหน้า</button>
+              {Array.from({length:totalVisitPages},(_,i)=>(
+                <button key={i} className={`btn btn-sm ${visitPage===i+1?'btn-primary':'btn-outline'}`} onClick={()=>setVisitPage(i+1)}>{i+1}</button>
+              ))}
+              <button className="btn btn-sm btn-outline" disabled={visitPage>=totalVisitPages} onClick={()=>setVisitPage(p=>Math.min(totalVisitPages,p+1))} style={{opacity:visitPage>=totalVisitPages?0.4:1}}>ถัดไป →</button>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -1069,7 +1139,8 @@ function PatientDetail({pat,visits,onBack,patients,savePatient,treatmentServices
 }
 
 // ===================== EXAMINE PAGE =====================
-function ExaminePage({patients,visits,saveVisit,nextVID,getPatient,getVisitsForHN,setCertModal,setReceiptModal,setAppointModal,medicines,patchMedicineStock,treatmentServices,receipts,saveReceipt,nextRID,today}) {
+function ExaminePage({patients,visits,saveVisit,nextVID,getPatient,getVisitsForHN,setCertModal,setReceiptModal,setAppointModal,medicines,patchMedicineStock,treatmentServices,receipts,saveReceipt,nextRID}) {
+  const today = new Date().toISOString().split('T')[0];
   const [query,setQuery]=useState('');
   const [searchResults,setSearchResults]=useState([]);
   const [pat,setPat]=useState(null);
@@ -1104,10 +1175,9 @@ function ExaminePage({patients,visits,saveVisit,nextVID,getPatient,getVisitsForH
   const loadPatient=(p)=>{
     setSearchResults([]);
     setPat(p);
-    const today_=today;
-    // Find an existing un-examined visit for today (queue created at registration) first
-    const todaysVisits=visits.filter(v=>v.hn===p.hn&&v.date===today_).sort((a,b)=>(a.id||'').localeCompare(b.id||''));
-    const pendingQueue=todaysVisits.find(v=>!v.dx&&!v.pe); // not yet examined by doctor
+    // Find an existing pending visit for today (queue created at registration) first
+    const todaysVisits=visits.filter(v=>v.hn===p.hn&&v.date===today).sort((a,b)=>(a.queueNo||a.id||'').localeCompare(b.queueNo||b.id||''));
+    const pendingQueue=todaysVisits.find(v=>v.status==='รอตรวจ'||((!v.status)&&!v.dx&&!v.pe));
     const existing=pendingQueue || todaysVisits[todaysVisits.length-1];
     if(existing){
       setVform({...existing,drugs:existing.drugs||[],services:existing.services||[]});
@@ -1115,7 +1185,7 @@ function ExaminePage({patients,visits,saveVisit,nextVID,getPatient,getVisitsForH
       // No queue today — pre-fill vitals from latest historical visit
       const latest=visits.filter(v=>v.hn===p.hn).sort((a,b)=>b.date.localeCompare(a.date))[0];
       setVform({
-        id:nextVID(),hn:p.hn,date:today_,
+        id:nextVID(),hn:p.hn,date:today,
         cc:'',pi:'',pe:'',dx:'',tx:'',
         drugs:[],services:[],
         bp:'',pr:'',rr:'',temp:'',o2:'',weight:'',height:'',
@@ -1125,37 +1195,31 @@ function ExaminePage({patients,visits,saveVisit,nextVID,getPatient,getVisitsForH
     setSaved(false);
   };
 
-  // ── Today's queue: all visits created today, across all patients, not yet examined
+  // ── Today's queue using the status field (set at Registration)
+  // Falls back to dx/pe heuristic for legacy visits created before status field existed
   const todayQueue = visits
-    .filter(v=>v.date===today && !v.dx && !v.pe)
-    .sort((a,b)=>(a.id||'').localeCompare(b.id||''))
+    .filter(v=>v.date===today && (v.status==='รอตรวจ' || (!v.status&&!v.dx&&!v.pe)))
+    .sort((a,b)=>(a.queueNo||a.id||'').localeCompare(b.queueNo||b.id||''))
     .map(v=>({visit:v, pat:getPatient(v.hn)}))
     .filter(q=>q.pat);
 
   const todayQueueDone = visits
-    .filter(v=>v.date===today && (v.dx||v.pe))
-    .sort((a,b)=>(a.id||'').localeCompare(b.id||''))
+    .filter(v=>v.date===today && (v.status==='ตรวจเสร็จ' || (!v.status&&(v.dx||v.pe))))
+    .sort((a,b)=>(b.id||'').localeCompare(a.id||''))
     .map(v=>({visit:v, pat:getPatient(v.hn)}))
     .filter(q=>q.pat);
 
   const save=async()=>{
-    // Deduct inventory stock for drugs ordered
-    if(vform.drugs&&vform.drugs.length>0){
-      for(const med of medicines){
-        const ordered=vform.drugs.filter(d=>d.medId===med.id);
-        if(ordered.length===0) continue;
-        const totalQty=ordered.reduce((s,d)=>s+Number(d.qty),0);
-        await patchMedicineStock(med.id, Math.max(0,med.stock-totalQty));
-      }
-    }
-    await saveVisit(vform);
+    const completed = {...vform, status:'ตรวจเสร็จ'};
+    await saveVisit(completed);
+    setVform(completed);
     setSaved(true);
-    setLastVisit(vform);
-    alert('บันทึกข้อมูลการตรวจเรียบร้อยแล้ว\n\n💊 ระบบหักสต็อกยาจากคลังแล้ว');
+    setLastVisit(completed);
+    alert('✅ บันทึกการตรวจเรียบร้อย\nย้ายผู้ป่วยไปที่ "ตรวจเสร็จแล้ว" แล้ว');
   };
 
-  // Issues the receipt record ONLY — no payment confirmation here.
-  // Payment method + "ชำระแล้ว" status are finalized later at the Receipt page counter.
+  // Issues receipt + deducts stock + marks visit as ตรวจเสร็จ.
+  // Payment method + "ชำระแล้ว" are finalized later at the Receipt page counter.
   const issueReceiptOnly=async()=>{
     const drugItems=(vform.drugs||[]).map(d=>({
       desc:d.name, qty:d.qty, unit:d.unit, price:d.price, type:'drug', medId:d.medId
@@ -1171,11 +1235,10 @@ function ExaminePage({patients,visits,saveVisit,nextVID,getPatient,getVisitsForH
       patname:pat.prefix+pat.fname+' '+pat.lname,
       date:today,
       items:allItems.length>0?allItems:[{desc:'ค่าตรวจรักษา',qty:1,unit:'ครั้ง',price:300,type:'service'}],
-      discount:0,
-      paid:'',
-      status:'รอชำระ',
+      discount:0, paid:'', status:'รอชำระ',
     };
     await saveReceipt(r);
+    // Deduct stock for dispensed drugs
     if(vform.drugs&&vform.drugs.length>0){
       for(const med of medicines){
         const ordered=vform.drugs.filter(d=>d.medId===med.id);
@@ -1183,10 +1246,13 @@ function ExaminePage({patients,visits,saveVisit,nextVID,getPatient,getVisitsForH
         await patchMedicineStock(med.id, Math.max(0,med.stock-ordered.reduce((s,d)=>s+Number(d.qty),0)));
       }
     }
-    await saveVisit(vform);
+    // Mark visit done and save full record
+    const completed = {...vform, status:'ตรวจเสร็จ'};
+    await saveVisit(completed);
+    setVform(completed);
     setSaved(true);
-    setLastVisit(vform);
-    alert(`สร้างใบเสร็จ ${r.id} เรียบร้อย — สถานะ "รอชำระ"\nยอดรวม: ${r.items.reduce((s,i)=>s+i.qty*i.price,0).toLocaleString()} บาท\n\nกรุณาแจ้งผู้ป่วยไปชำระเงินที่หน้า "ใบเสร็จรับเงิน"`);
+    setLastVisit(completed);
+    alert(`✅ ออกใบเสร็จ ${r.id} แล้ว — สถานะ "รอชำระ"\nยอดรวม: ${r.items.reduce((s,i)=>s+i.qty*i.price,0).toLocaleString()} บาท\n\nกรุณาแจ้งผู้ป่วยไปชำระเงินที่หน้า "ใบเสร็จรับเงิน"`);
   };
 
   const age=(dob)=>{if(!dob)return '-';return Math.floor((new Date()-new Date(dob))/(365.25*24*60*60*1000))+' ปี';};
@@ -1261,22 +1327,53 @@ function ExaminePage({patients,visits,saveVisit,nextVID,getPatient,getVisitsForH
             ))}
           </div>
         )}
+      </div>
+
+      {/* ── COMPLETED VISITS — full section, always visible when there are done visits ── */}
+      <div className="card no-print" style={{marginBottom:14,border:'2px solid #1e8449'}}>
+        <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:todayQueueDone.length>0?10:0}}>
+          <span style={{fontWeight:700,fontSize:13,color:'#1e8449'}}>✅ ตรวจเสร็จแล้ววันนี้</span>
+          <span className="tag tag-green">{todayQueueDone.length} ราย</span>
+          <span style={{fontSize:11,color:'var(--gray)',marginLeft:4}}>คลิกเพื่อเปิด/แก้ไขบันทึกการตรวจ</span>
+        </div>
+        {todayQueueDone.length===0&&(
+          <div style={{fontSize:13,color:'var(--gray)',padding:'4px 0'}}>ยังไม่มีผู้ป่วยที่ตรวจเสร็จวันนี้</div>
+        )}
         {todayQueueDone.length>0&&(
-          <details style={{marginTop:10}}>
-            <summary style={{cursor:'pointer',fontSize:12,color:'var(--gray)',fontWeight:600}}>ดูคิวที่ตรวจแล้ววันนี้ ({todayQueueDone.length})</summary>
-            <div style={{display:'flex',flexDirection:'column',gap:6,marginTop:8}}>
-              {todayQueueDone.map(({visit,pat:qp})=>(
-                <div key={visit.id} onClick={()=>loadVisit(qp,visit)}
-                  style={{display:'flex',alignItems:'center',gap:12,padding:'7px 12px',background:'#f4fbf7',border:'1px solid #d5f0e0',borderRadius:8,cursor:'pointer'}}>
-                  <span style={{color:'#1e8449',fontSize:14}}>✓</span>
-                  <div style={{flex:1,fontSize:12.5}}>
-                    {qp.prefix}{qp.fname} {qp.lname} <span style={{color:'var(--gray)'}}>(HN: {qp.hn})</span>
+          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(280px,1fr))',gap:8}}>
+            {todayQueueDone.map(({visit:dv,pat:dp},idx)=>{
+              const isActive = vform?.id===dv.id;
+              const receipt = typeof receipts!=='undefined' ? receipts?.find(r=>r.visitId===dv.id) : null;
+              return (
+                <div key={dv.id}
+                  onClick={()=>loadVisit(dp,dv)}
+                  style={{
+                    display:'flex',alignItems:'flex-start',gap:10,padding:'10px 12px',
+                    background:isActive?'#e8f8f0':'#f4fbf7',
+                    border:`1.5px solid ${isActive?'#1e8449':'#d5f0e0'}`,
+                    borderRadius:8,cursor:'pointer',transition:'all 0.15s',
+                  }}
+                  onMouseEnter={e=>!isActive&&(e.currentTarget.style.background='#e8f8f0')}
+                  onMouseLeave={e=>!isActive&&(e.currentTarget.style.background='#f4fbf7')}>
+                  <div style={{width:32,height:32,borderRadius:'50%',background:'#1e8449',color:'#fff',display:'flex',alignItems:'center',justifyContent:'center',fontWeight:800,fontSize:13,flexShrink:0}}>
+                    {dv.queueNo||String(idx+1).padStart(2,'0')}
                   </div>
-                  <span style={{fontSize:11,color:'var(--gray)'}}>{visit.dx||'ตรวจแล้ว'}</span>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontWeight:700,fontSize:13,color:'var(--gray-dark)'}}>
+                      {dp.prefix}{dp.fname} {dp.lname}
+                      <span style={{fontWeight:400,color:'var(--gray)',fontSize:11,marginLeft:6}}>HN:{dp.hn}</span>
+                    </div>
+                    {dv.cc&&<div style={{fontSize:11,color:'#555',marginTop:1}}>CC: {dv.cc.slice(0,40)}{dv.cc.length>40?'...':''}</div>}
+                    {dv.dx&&<div style={{fontSize:11,color:'#1e8449',fontWeight:600,marginTop:1}}>Dx: {dv.dx.slice(0,40)}</div>}
+                    <div style={{display:'flex',gap:6,marginTop:4,flexWrap:'wrap'}}>
+                      <span className="tag tag-green" style={{fontSize:10}}>✅ ตรวจเสร็จ</span>
+                      {receipt&&<span className={`tag ${receipt.status==='ชำระแล้ว'?'tag-green':'tag-orange'}`} style={{fontSize:10}}>🧾 {receipt.status}</span>}
+                    </div>
+                  </div>
                 </div>
-              ))}
-            </div>
-          </details>
+              );
+            })}
+          </div>
         )}
       </div>
 
