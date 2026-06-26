@@ -9,7 +9,7 @@ const supa = {
 
   // ── Generic fetch all rows from a table
   async getAll(table) {
-    const r = await fetch(`${SUPA_URL}/rest/v1/${table}?order=created_at.asc`, { headers: this.headers });
+    const r = await fetch(`${SUPA_URL}/rest/v1/${table}?select=*`, { headers: this.headers });
     if (!r.ok) { console.error(`getAll ${table}:`, await r.text()); return null; }
     return r.json();
   },
@@ -58,6 +58,7 @@ const fromDbVisit = (r) => r ? ({
   // status: 'รอตรวจ' | 'ตรวจเสร็จ' — legacy rows without status treated as done
   status: r.status || (r.dx || r.pe ? 'ตรวจเสร็จ' : 'รอตรวจ'),
   queueNo: r.queue_no || '',
+  created_at: r.created_at || '',
 }) : null;
 
 const toDbVisit = (v) => ({
@@ -68,6 +69,7 @@ const toDbVisit = (v) => ({
   drugs: v.drugs||[], services: v.services||[],
   status: v.status || 'รอตรวจ',
   queue_no: v.queueNo || '',
+  created_at: v.created_at || new Date().toISOString(),
 });
 
 const fromDbReceipt = (r) => r ? ({
@@ -332,14 +334,17 @@ function ClinicDashboard() {
           supa.getAll('treatment_services'),
         ]);
         if (cancelled) return;
-        if (pts === null) { setDbError('ไม่สามารถเชื่อมต่อฐานข้อมูลได้ — ใช้ข้อมูลทดสอบแทน'); setLoading(false); return; }
-        // Use DB data if tables have rows, else keep sample data as seed
-        if (pts.length > 0) setPatients(pts);
-        if (vis.length > 0) setVisits(vis.map(fromDbVisit));
-        if (apps.length > 0) setAppointments(apps.map(fromDbAppointment));
-        if (recs.length > 0) setReceipts(recs.map(fromDbReceipt));
-        if (meds.length > 0) setMedicines(meds);
-        if (svcs.length > 0) setTreatmentServices(svcs.map(fromDbService));
+        // Guard each table independently — one failure must not silently break the rest
+        if (pts === null && vis === null) {
+          setDbError('ไม่สามารถเชื่อมต่อฐานข้อมูลได้ — ใช้ข้อมูลทดสอบแทน');
+          setLoading(false); return;
+        }
+        if (pts  !== null && pts.length  > 0) setPatients(pts);
+        if (vis  !== null && vis.length  > 0) setVisits(vis.map(fromDbVisit));
+        if (apps !== null && apps.length > 0) setAppointments(apps.map(fromDbAppointment));
+        if (recs !== null && recs.length > 0) setReceipts(recs.map(fromDbReceipt));
+        if (meds !== null && meds.length > 0) setMedicines(meds);
+        if (svcs !== null && svcs.length > 0) setTreatmentServices(svcs.map(fromDbService));
         setDbReady(true);
       } catch(e) {
         if (!cancelled) {
@@ -389,7 +394,12 @@ function ClinicDashboard() {
       const exists = prev.find(x => x.id === v.id);
       return exists ? prev.map(x => x.id === v.id ? v : x) : [...prev, v];
     });
-    await supa.upsert('visits', toDbVisit(v));
+    const result = await supa.upsert('visits', toDbVisit(v));
+    if (!result) {
+      console.error('❌ saveVisit failed — visit may not be persisted:', v.id);
+      alert('⚠️ เกิดข้อผิดพลาดในการบันทึกข้อมูลลงฐานข้อมูล\nกรุณาตรวจสอบการเชื่อมต่อ และบันทึกซ้ำอีกครั้ง');
+    }
+    return result;
   };
 
   const saveReceipt = async (r) => {
@@ -2125,7 +2135,6 @@ function CertPage({patients,visits,getPatient}) {
 
         {/* Header */}
         <div style={{textAlign:'center',borderBottom:'2.5px solid #1a5276',paddingBottom:12,marginBottom:16}}>
-          <img src={CLINIC_LOGO} alt="โลโกคลินิก" style={{width:70,height:70,objectFit:'contain',display:'block',margin:'0 auto 4px'}} />
           <div style={{fontSize:13,fontWeight:700,color:'#1a5276',letterSpacing:0.5}}>{CLINIC_NAME}</div>
           <div style={{fontSize:11,color:'#555'}}>{CLINIC_ADDRESS}</div>
           <div style={{fontSize:11,color:'#555'}}>โทรศัพท์ {CLINIC_TEL} &nbsp;|&nbsp; ใบอนุญาตประกอบกิจการ เลขที่ {DOCTOR_LICENSE}</div>
