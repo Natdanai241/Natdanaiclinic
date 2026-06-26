@@ -687,7 +687,7 @@ function RegisterPage({patients,savePatient,visits,saveVisit,nextHN,nextVID,setP
   const [subpage, setSubpage] = useState('list');
   const [search, setSearch] = useState('');
   const [form, setForm] = useState({
-    prefix:'นาย',fname:'',lname:'',gender:'ชาย',dob:'',idcard:'',tel:'',
+    prefix:'นาย',fname:'',lname:'',gender:'ชาย',dob:'',idcard:'',tel:'',lineId:'',
     address:'',bloodtype:'',allergy:'',chronic:'',currentmed:'',
     email:'',occupation:'',emcontact:'',emtel:'',
   });
@@ -724,7 +724,7 @@ function RegisterPage({patients,savePatient,visits,saveVisit,nextHN,nextVID,setP
     }
     const qNum = String(patients.length+1).padStart(3,'0');
     setLastRegistered({pat:newP, visitId, qNum, cc:intake.cc});
-    setForm({prefix:'นาย',fname:'',lname:'',gender:'ชาย',dob:'',idcard:'',tel:'',address:'',bloodtype:'',allergy:'',chronic:'',currentmed:'',email:'',occupation:'',emcontact:'',emtel:''});
+    setForm({prefix:'นาย',fname:'',lname:'',gender:'ชาย',dob:'',idcard:'',tel:'',lineId:'',address:'',bloodtype:'',allergy:'',chronic:'',currentmed:'',email:'',occupation:'',emcontact:'',emtel:''});
     setIntake({cc:'',temp:'',bp_sys:'',bp_dia:'',pr:'',rr:'',o2:'',weight:'',height:'',nurse:''});
     setSubpage('registered');
   };
@@ -893,6 +893,7 @@ function PatientForm({form,setForm}) {
         </div>
         <div className="row mt-2">
           <div className="col-1"><label>เบอร์โทรศัพท์</label><input value={form.tel} onChange={e=>f('tel',e.target.value)} placeholder="0x-xxxx-xxxx" /></div>
+          <div className="col-1"><label>Line ID</label><input value={form.lineId||''} onChange={e=>f('lineId',e.target.value)} placeholder="ไอดี Line" /></div>
           <div className="col-1"><label>อีเมล</label><input value={form.email} onChange={e=>f('email',e.target.value)} placeholder="email@..." /></div>
           <div className="col-1"><label>อาชีพ</label><input value={form.occupation} onChange={e=>f('occupation',e.target.value)} /></div>
         </div>
@@ -1065,7 +1066,7 @@ function PatientDetail({pat,visits,onBack,patients,savePatient,treatmentServices
             <ClinicHeader />
             <div style={{textAlign:'center',fontWeight:700,fontSize:14,color:'var(--primary)',marginBottom:12}}>ข้อมูลเวชระเบียนผู้ป่วย</div>
             <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,fontSize:13}}>
-              {[['HN',pat.hn],['ชื่อ-นามสกุล',pat.prefix+pat.fname+' '+pat.lname],['เพศ',pat.gender],['อายุ',age(pat.dob)],['วันเกิด',thaiDate(pat.dob)],['หมู่เลือด',pat.bloodtype||'-'],['เลขบัตรประชาชน',pat.idcard||'-'],['เบอร์โทร',pat.tel||'-'],['ที่อยู่',pat.address||'-'],['อาชีพ',pat.occupation||'-'],].map(([k,v])=>(
+              {[['HN',pat.hn],['ชื่อ-นามสกุล',pat.prefix+pat.fname+' '+pat.lname],['เพศ',pat.gender],['อายุ',age(pat.dob)],['วันเกิด',thaiDate(pat.dob)],['หมู่เลือด',pat.bloodtype||'-'],['เลขบัตรประชาชน',pat.idcard||'-'],['เบอร์โทร',pat.tel||'-'],['Line ID',pat.lineId||'-'],['ที่อยู่',pat.address||'-'],['อาชีพ',pat.occupation||'-'],].map(([k,v])=>(
                 <div key={k} style={{padding:'5px 0',borderBottom:'1px solid var(--gray-light)'}}><span className="text-gray">{k}: </span><span style={{fontWeight:600}}>{v}</span></div>
               ))}
             </div>
