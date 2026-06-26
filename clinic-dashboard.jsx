@@ -202,6 +202,306 @@ const getQuarterBounds = (d=new Date()) => {
   return [s.toISOString().split('T')[0], e.toISOString().split('T')[0]];
 };
 
+// ===================== PRINT BLANK MEDICAL RECORD =====================
+function printBlankMedicalRecord() {
+  const win = window.open('','_blank','width=900,height=1200');
+  if(!win) return;
+  win.document.write(`<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8"/>
+<title>แบบฟอร์มเวชระเบียน — ${CLINIC_NAME}</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700&display=swap');
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{font-family:'Sarabun',sans-serif;font-size:12pt;color:#111;background:#fff;padding:0;}
+  @page{size:A4 portrait;margin:14mm 14mm 14mm 18mm;}
+  @media print{body{padding:0;}button{display:none!important;}.no-print{display:none!important;}}
+  .page{width:210mm;min-height:297mm;margin:0 auto;padding:14mm 14mm 14mm 18mm;background:#fff;}
+  h1{font-size:14pt;font-weight:700;color:#1a5276;text-align:center;margin-bottom:2pt;}
+  .clinic-addr{font-size:9pt;color:#555;text-align:center;margin-bottom:2pt;}
+  .form-title{font-size:13pt;font-weight:700;text-align:center;letter-spacing:1px;margin:8pt 0 10pt;border:2px solid #1a5276;display:inline-block;padding:3pt 20pt;border-radius:3pt;color:#1a5276;}
+  .title-row{text-align:center;margin-bottom:12pt;}
+  .logo{display:block;margin:0 auto 4pt;height:52pt;object-fit:contain;}
+  .section{margin-bottom:8pt;}
+  .section-header{font-size:10pt;font-weight:700;color:#fff;background:#1a5276;padding:3pt 8pt;border-radius:2pt 2pt 0 0;margin-bottom:0;letter-spacing:0.3px;}
+  .section-body{border:1px solid #1a5276;border-top:none;border-radius:0 0 2pt 2pt;padding:7pt 8pt 5pt;}
+  .row{display:flex;gap:8pt;margin-bottom:5pt;align-items:flex-end;}
+  .field{flex:1;}
+  .field label{font-size:8.5pt;font-weight:700;color:#333;display:block;margin-bottom:1pt;}
+  .line{border-bottom:1px solid #555;min-height:16pt;width:100%;}
+  .line-lg{border-bottom:1px solid #555;min-height:22pt;width:100%;}
+  .write-area{border:1px solid #bbb;border-radius:2pt;min-height:36pt;width:100%;background:#fafafa;}
+  .write-area-lg{border:1px solid #bbb;border-radius:2pt;min-height:52pt;width:100%;background:#fafafa;}
+  .write-area-xl{border:1px solid #bbb;border-radius:2pt;min-height:72pt;width:100%;background:#fafafa;}
+  .vitals-grid{display:grid;grid-template-columns:repeat(6,1fr);gap:6pt;}
+  .vital-box{border:1px solid #ccc;border-radius:3pt;padding:4pt 5pt;text-align:center;background:#f8faff;}
+  .vital-box label{font-size:8pt;font-weight:700;color:#1a5276;display:block;margin-bottom:2pt;}
+  .vital-box .v-line{border-bottom:1px solid #555;min-height:14pt;margin:0 4pt;}
+  .vital-box .unit{font-size:7.5pt;color:#777;margin-top:2pt;}
+  .allergy-box{border:2px solid #c0392b;border-radius:3pt;background:#fff5f5;padding:5pt 8pt;}
+  .allergy-box label{font-size:9pt;font-weight:700;color:#c0392b;}
+  .allergy-box .line{border-bottom:1px solid #c0392b;min-height:15pt;}
+  .drugs-table{width:100%;border-collapse:collapse;font-size:9pt;}
+  .drugs-table th{background:#1a5276;color:#fff;padding:3pt 5pt;font-weight:600;font-size:8.5pt;text-align:center;}
+  .drugs-table td{border:1px solid #ccc;padding:2pt 5pt;height:14pt;}
+  .drugs-table tr:nth-child(even) td{background:#f5f8ff;}
+  .services-table{width:100%;border-collapse:collapse;font-size:9pt;}
+  .services-table th{background:#1e8449;color:#fff;padding:3pt 5pt;font-weight:600;font-size:8.5pt;text-align:center;}
+  .services-table td{border:1px solid #ccc;padding:2pt 5pt;height:14pt;}
+  .services-table tr:nth-child(even) td{background:#f0fff4;}
+  .sig-row{display:flex;justify-content:space-between;margin-top:12pt;gap:16pt;}
+  .sig-box{flex:1;text-align:center;}
+  .sig-line{border-bottom:1px solid #555;min-height:28pt;margin:0 8pt 3pt;}
+  .sig-label{font-size:9pt;color:#333;font-weight:600;}
+  .sig-date{font-size:8pt;color:#777;margin-top:1pt;}
+  .notice{font-size:8pt;color:#777;text-align:center;margin-top:8pt;border-top:1px dashed #ccc;padding-top:5pt;}
+  .col2{flex:2;}
+  .col3{flex:3;}
+  .bold{font-weight:700;}
+  hr.divider{border:none;border-top:1px dashed #bbb;margin:6pt 0;}
+  .page-num{font-size:8pt;color:#aaa;text-align:right;margin-top:4pt;}
+</style>
+</head>
+<body>
+<div class="page">
+
+  <!-- ===== HEADER ===== -->
+  <div class="title-row">
+    <img class="logo" src="${CLINIC_LOGO}" alt="โลโกคลินิก"/>
+    <h1>${CLINIC_NAME}</h1>
+    <div class="clinic-addr">${CLINIC_ADDRESS}</div>
+    <div class="clinic-addr">โทร. ${CLINIC_TEL}</div>
+    <div style="margin-top:6pt;"><span class="form-title">แบบบันทึกเวชระเบียน (ฉุกเฉิน)</span></div>
+    <div style="font-size:8pt;color:#888;margin-top:3pt;">ใช้เมื่อระบบคอมพิวเตอร์ไม่พร้อมใช้งาน — กรุณากรอกข้อมูลด้วยลายมือตัวบรรจง</div>
+  </div>
+
+  <!-- ===== SECTION 1: PATIENT INFO ===== -->
+  <div class="section">
+    <div class="section-header">ข้อมูลผู้ป่วย (Patient Information)</div>
+    <div class="section-body">
+      <div class="row">
+        <div class="field" style="flex:0.6"><label>HN (เลขประจำตัวผู้ป่วย)</label><div class="line"></div></div>
+        <div class="field" style="flex:0.5"><label>คำนำหน้า</label><div class="line"></div></div>
+        <div class="field col2"><label>ชื่อ (First Name)</label><div class="line"></div></div>
+        <div class="field col2"><label>นามสกุล (Last Name)</label><div class="line"></div></div>
+      </div>
+      <div class="row">
+        <div class="field" style="flex:0.7"><label>เพศ (Gender)</label><div class="line"></div></div>
+        <div class="field"><label>วันเกิด (Date of Birth)</label><div class="line"></div></div>
+        <div class="field"><label>อายุ (Age)</label><div class="line"></div></div>
+        <div class="field col2"><label>เลขบัตรประชาชน / Passport</label><div class="line"></div></div>
+        <div class="field"><label>หมู่เลือด</label><div class="line"></div></div>
+      </div>
+      <div class="row">
+        <div class="field"><label>เบอร์โทรศัพท์ (Tel)</label><div class="line"></div></div>
+        <div class="field"><label>Line ID</label><div class="line"></div></div>
+        <div class="field"><label>อีเมล (Email)</label><div class="line"></div></div>
+        <div class="field"><label>อาชีพ (Occupation)</label><div class="line"></div></div>
+      </div>
+      <div class="row">
+        <div class="field col3"><label>ที่อยู่ (Address)</label><div class="line"></div></div>
+      </div>
+      <div class="row">
+        <div class="field col2"><label>ผู้ติดต่อฉุกเฉิน (Emergency Contact)</label><div class="line"></div></div>
+        <div class="field"><label>เบอร์โทรฉุกเฉิน (Emergency Tel)</label><div class="line"></div></div>
+      </div>
+
+      <!-- Allergy -->
+      <div style="margin-top:5pt;">
+        <div class="allergy-box">
+          <div class="row" style="align-items:center;margin-bottom:0;">
+            <label style="font-size:9pt;font-weight:700;color:#c0392b;white-space:nowrap;margin-right:8pt;">⚠️ ประวัติแพ้ยา / Allergies :</label>
+            <div style="flex:1;" class="line" style="border-color:#c0392b;"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="row" style="margin-top:5pt;">
+        <div class="field col2"><label>โรคประจำตัว (Chronic Diseases)</label><div class="line-lg"></div></div>
+        <div class="field col2"><label>ยาที่ใช้ประจำ (Current Medications)</label><div class="line-lg"></div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== SECTION 2: VISIT INFO ===== -->
+  <div class="section">
+    <div class="section-header">ข้อมูลการมาตรวจ (Visit Information)</div>
+    <div class="section-body">
+      <div class="row">
+        <div class="field" style="flex:0.8"><label>วันที่ตรวจ (Date)</label><div class="line"></div></div>
+        <div class="field" style="flex:0.6"><label>เวลา (Time)</label><div class="line"></div></div>
+        <div class="field" style="flex:0.6"><label>เลขคิว (Queue No.)</label><div class="line"></div></div>
+        <div class="field"><label>พยาบาล / ผู้รับผิดชอบ (Nurse)</label><div class="line"></div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== SECTION 3: VITAL SIGNS ===== -->
+  <div class="section">
+    <div class="section-header">สัญญาณชีพ (Vital Signs)</div>
+    <div class="section-body">
+      <div class="vitals-grid">
+        <div class="vital-box">
+          <label>BP (mmHg)</label>
+          <div class="v-line"></div>
+          <div class="unit">ความดันโลหิต</div>
+        </div>
+        <div class="vital-box">
+          <label>PR (bpm)</label>
+          <div class="v-line"></div>
+          <div class="unit">ชีพจร</div>
+        </div>
+        <div class="vital-box">
+          <label>RR (/min)</label>
+          <div class="v-line"></div>
+          <div class="unit">การหายใจ</div>
+        </div>
+        <div class="vital-box">
+          <label>Temp (°C)</label>
+          <div class="v-line"></div>
+          <div class="unit">อุณหภูมิ</div>
+        </div>
+        <div class="vital-box">
+          <label>O₂ Sat (%)</label>
+          <div class="v-line"></div>
+          <div class="unit">ออกซิเจน</div>
+        </div>
+        <div class="vital-box">
+          <label>BW / HT</label>
+          <div class="v-line"></div>
+          <div class="unit">น้ำหนัก / ส่วนสูง (kg/cm)</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== SECTION 4: CLINICAL NOTES ===== -->
+  <div class="section">
+    <div class="section-header">อาการสำคัญ — Chief Complaint (CC)</div>
+    <div class="section-body">
+      <div class="write-area"></div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-header">ประวัติการเจ็บป่วยปัจจุบัน — Present Illness (PI)</div>
+    <div class="section-body">
+      <div class="write-area-lg"></div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-header">การตรวจร่างกาย — Physical Examination (PE)</div>
+    <div class="section-body">
+      <div class="write-area-xl"></div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-header">การวินิจฉัย — Diagnosis (Dx) / รหัส ICD-10</div>
+    <div class="section-body">
+      <div class="write-area"></div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-header">การรักษา / หัตถการ — Treatment &amp; Procedure (Tx)</div>
+    <div class="section-body">
+      <div class="write-area-xl"></div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-header">บันทึกเพิ่มเติมของแพทย์ — Doctor Notes</div>
+    <div class="section-body">
+      <div class="write-area-xl"></div>
+    </div>
+  </div>
+
+  <!-- ===== SECTION 5: MEDICATIONS ===== -->
+  <div class="section">
+    <div class="section-header">รายการยาที่สั่ง — Prescribed Medications</div>
+    <div class="section-body" style="padding-bottom:4pt;">
+      <table class="drugs-table" style="width:100%;border-collapse:collapse;">
+        <thead>
+          <tr>
+            <th style="width:5%;">ลำดับ</th>
+            <th style="width:32%;">ชื่อยา (Drug Name)</th>
+            <th style="width:15%;">ปริมาณ / ขนาด (Dose)</th>
+            <th style="width:18%;">วิธีใช้ (Sig)</th>
+            <th style="width:10%;">จำนวน (Qty)</th>
+            <th style="width:10%;">หน่วย (Unit)</th>
+            <th style="width:10%;">ราคา (Price)</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${Array.from({length:8},(_,i)=>`<tr><td style="text-align:center;">${i+1}</td><td></td><td></td><td></td><td></td><td></td><td></td></tr>`).join('')}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ===== SECTION 6: SERVICES / PROCEDURES ===== -->
+  <div class="section">
+    <div class="section-header" style="background:#1e8449;">หัตถการ / บริการ — Procedures &amp; Services</div>
+    <div class="section-body" style="padding-bottom:4pt;border-color:#1e8449;">
+      <table class="services-table" style="width:100%;border-collapse:collapse;">
+        <thead>
+          <tr>
+            <th style="width:5%;">ลำดับ</th>
+            <th style="width:45%;">รายการ (Service / Procedure)</th>
+            <th style="width:15%;">ประเภท (Category)</th>
+            <th style="width:10%;">จำนวน (Qty)</th>
+            <th style="width:10%;">หน่วย (Unit)</th>
+            <th style="width:15%;">ราคา (Price)</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${Array.from({length:5},(_,i)=>`<tr><td style="text-align:center;">${i+1}</td><td></td><td></td><td></td><td></td><td></td></tr>`).join('')}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ===== SECTION 7: SIGNATURES ===== -->
+  <div class="sig-row">
+    <div class="sig-box">
+      <div class="sig-line"></div>
+      <div class="sig-label">ลายมือชื่อพยาบาล / ผู้ตรวจรับ</div>
+      <div class="sig-date">วันที่ ............../............../..............&nbsp;&nbsp; เวลา ................ น.</div>
+    </div>
+    <div class="sig-box">
+      <div class="sig-line"></div>
+      <div class="sig-label bold">${DOCTOR_NAME}</div>
+      <div class="sig-label" style="font-weight:400;font-size:8.5pt;">${DOCTOR_TITLE}</div>
+      <div class="sig-label" style="font-weight:400;font-size:8pt;color:#777;">ใบอนุญาต เลขที่ ${DOCTOR_LICENSE}</div>
+      <div class="sig-date">วันที่ ............../............../..............&nbsp;&nbsp; เวลา ................ น.</div>
+    </div>
+    <div class="sig-box">
+      <div class="sig-line"></div>
+      <div class="sig-label">ลายมือชื่อผู้ป่วย / ผู้แทน</div>
+      <div class="sig-date">วันที่ ............../............../..............&nbsp;&nbsp; เวลา ................ น.</div>
+    </div>
+  </div>
+
+  <div class="notice">
+    ⚠️ แบบฟอร์มนี้ใช้สำหรับกรณีระบบคอมพิวเตอร์ไม่พร้อมใช้งานเท่านั้น • กรุณากรอกข้อมูลครบถ้วนและนำส่งเจ้าหน้าที่เพื่อบันทึกเข้าระบบเมื่อระบบกลับมาใช้งานได้ •
+    ข้อมูลผู้ป่วยเป็นความลับ
+  </div>
+  <div class="page-num">พิมพ์เมื่อ: ${new Date().toLocaleString('th-TH')}</div>
+
+</div>
+<div style="text-align:center;margin:18px 0 0;font-family:'Sarabun',sans-serif;">
+  <button onclick="window.print()" style="padding:9px 28px;background:#1a5276;color:#fff;border:none;border-radius:5px;cursor:pointer;font-size:13px;font-family:'Sarabun',sans-serif;font-weight:700;">🖨️ พิมพ์แบบฟอร์ม (A4)</button>
+  <button onclick="window.close()" style="margin-left:10px;padding:9px 20px;background:#7f8c8d;color:#fff;border:none;border-radius:5px;cursor:pointer;font-size:13px;font-family:'Sarabun',sans-serif;">ปิด</button>
+</div>
+</body>
+</html>`);
+  win.document.close();
+  setTimeout(()=>{win.focus();},400);
+}
+
 // Print helper — opens a new window with clean content
 const doPrint = (elementId, title='') => {
   const el = document.getElementById(elementId);
@@ -577,7 +877,10 @@ function DashboardPage({todayVisits,todayAppoints,lowStock,monthRevenue,patients
     <div>
       <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:16}}>
         <h2 style={{fontWeight:700,fontSize:18,color:'var(--primary)'}}>📊 ภาพรวมคลินิก</h2>
-        <button className="btn btn-print btn-sm no-print" onClick={()=>doPrint('dashboard-printarea','ภาพรวมคลินิก')}>🖨️ พิมพ์หน้าหลัก</button>
+        <div style={{display:'flex',gap:8}}>
+          <button className="btn btn-sm no-print" style={{background:'#117a8b',color:'#fff',border:'none'}} onClick={printBlankMedicalRecord}>📋 พิมพ์แบบฟอร์มเวชระเบียน</button>
+          <button className="btn btn-print btn-sm no-print" onClick={()=>doPrint('dashboard-printarea','ภาพรวมคลินิก')}>🖨️ พิมพ์หน้าหลัก</button>
+        </div>
       </div>
       <div id="dashboard-printarea">
         <div style={{display:'none'}} className="print-only"><ClinicHeader /><div style={{textAlign:'center',fontWeight:700,fontSize:14,marginBottom:12}}>รายงานภาพรวมคลินิก — {thaiDate(today)}</div></div>
