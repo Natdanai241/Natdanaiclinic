@@ -1599,8 +1599,8 @@ function ExaminePage({ patients, visits, saveVisit, nextVID, getPatient, getVisi
         setLastVisit(completed);
         const result = await saveVisit(completed);
         if (result === null) {
-            console.error('save: DB write failed after retries');
-            alert('⚠️ บันทึกสำเร็จในหน้าจอ แต่ไม่สามารถ sync ฐานข้อมูลได้\nกรุณาตรวจสอบ console และการเชื่อมต่อ Supabase');
+            console.error('save: DB write failed');
+            // rlsError modal is shown by saveVisit if it's a permissions issue
         }
         else {
             alert('✅ บันทึกการตรวจเรียบร้อย\nย้ายผู้ป่วยไปที่ "ตรวจเสร็จแล้ว" แล้ว');
