@@ -18,14 +18,8 @@ const supa = {
   },
 
   // ── Learn a bad column and cache it
-  // Handles two error formats:
-  //   1. Postgres: column "col_name" of relation "table" does not exist
-  //   2. PostgREST PGRST204: Could not find the 'col_name' column of 'table' in the schema cache
   _learnBadCol(table, errText) {
-    const colMatch =
-      errText.match(/column \"([^\"]+)\" of relation/) ||
-      errText.match(/Could not find the '([^']+)' column of/) ||
-      errText.match(/\bcould not find[^']*'([^']+)'\b/i);
+    const colMatch = errText.match(/column "([^"]+)" of relation/);
     if (!colMatch) return null;
     const badCol = colMatch[1];
     if (!this._missingCols[table]) this._missingCols[table] = [];
@@ -77,11 +71,10 @@ const supa = {
         if (_depth < 10 && this._learnBadCol(table, errText)) {
           return this.insert(table, data, _depth + 1);
         }
-        // Return the error detail so callers can surface it to the user
-        return { _error: `HTTP ${r.status} on ${table}: ${errText}` };
+        return null;
       }
       return r.json();
-    } catch(e) { console.error(`insert ${table} network error:`, e); return { _error: String(e) }; }
+    } catch(e) { console.error(`insert ${table} network error:`, e); return null; }
   },
 
   // ── PATCH (update) by primary key, retry on column mismatch
@@ -104,11 +97,10 @@ const supa = {
         if (_depth < 10 && this._learnBadCol(table, errText)) {
           return this.patch(table, pkCol, pkVal, data, _depth + 1);
         }
-        // Return the error detail so callers can surface it to the user
-        return { _error: `HTTP ${r.status} on ${table}: ${errText}` };
+        return null;
       }
       return r.json();
-    } catch(e) { console.error(`patch ${table} network error:`, e); return { _error: String(e) }; }
+    } catch(e) { console.error(`patch ${table} network error:`, e); return null; }
   },
 
   // ── Upsert: try INSERT first; if 409 conflict → PATCH instead
@@ -201,25 +193,19 @@ const fromDbVisit = (r) => r ? ({
   queueNo: r.queue_no || '',
 }) : null;
 
-const toDbVisit = (v) => {
-  // Build core row — always safe to send
-  const row = {
-    id:v.id, hn:v.hn, date:v.date, cc:v.cc||'', pi:v.pi||'', pe:v.pe||'',
-    dx:v.dx||'', tx:v.tx||'', note:v.note||'', nurse:v.nurse||'',
-    bp:v.bp||'', pr:v.pr||'', rr:v.rr||'', temp:v.temp||'', o2:v.o2||'',
-    weight:v.weight||'', height:v.height||'',
-    // Send as native arrays — Supabase PostgREST handles jsonb columns natively.
-    // fromDbVisit already handles both array and string for backward compatibility.
-    drugs: Array.isArray(v.drugs) ? v.drugs : [],
-    services: Array.isArray(v.services) ? v.services : [],
-    // These columns may not exist in older DB schemas — supa._learnBadCol will auto-strip them on error
-    status: v.status || 'รอตรวจ',
-  };
-  // queue_no is optional — only include if the column exists in DB (auto-stripped on first PGRST204 error)
-  // This prevents the insert failure when queue_no column is missing from the visits table.
-  if (v.queueNo) row.queue_no = v.queueNo;
-  return row;
-};
+const toDbVisit = (v) => ({
+  id:v.id, hn:v.hn, date:v.date, cc:v.cc||'', pi:v.pi||'', pe:v.pe||'',
+  dx:v.dx||'', tx:v.tx||'', note:v.note||'', nurse:v.nurse||'',
+  bp:v.bp||'', pr:v.pr||'', rr:v.rr||'', temp:v.temp||'', o2:v.o2||'',
+  weight:v.weight||'', height:v.height||'',
+  // Send as native arrays — Supabase PostgREST handles jsonb columns natively.
+  // fromDbVisit already handles both array and string for backward compatibility.
+  drugs: Array.isArray(v.drugs) ? v.drugs : [],
+  services: Array.isArray(v.services) ? v.services : [],
+  // These columns may not exist in older DB schemas — supa.upsert will auto-strip them on error
+  status: v.status || 'รอตรวจ',
+  queue_no: v.queueNo || '',
+});
 
 const fromDbReceipt = (r) => r ? ({
   id:r.id, hn:r.hn, visitId:r.visit_id, patname:r.patname, date:r.date,
@@ -548,24 +534,29 @@ function ClinicDashboard() {
     let result;
     if (existedInDb) {
       result = await supa.patch('visits', 'id', v.id, dbRow);
-      if (result === null || (result && result._error)) {
+      if (result === null) {
         console.warn('saveVisit: PATCH failed, trying INSERT');
         result = await supa.insert('visits', dbRow);
       }
     } else {
       result = await supa.insert('visits', dbRow);
-      if (result === null || (result && result._error)) {
+      if (result === null) {
         console.warn('saveVisit: INSERT failed, trying PATCH');
         result = await supa.patch('visits', 'id', v.id, dbRow);
       }
     }
     if (result === 'RLS_ERROR') { setRlsError(true); return null; }
-    if (result === null || (result && result._error)) {
-      const errMsg = (result && result._error) ? result._error : 'ไม่ทราบสาเหตุ — ดู Console';
-      console.error('saveVisit: all DB write attempts failed for visit', v.id, errMsg);
-      setSaveError(errMsg);
+    if (result === null) {
+      console.error('saveVisit: all DB write attempts failed for visit', v.id);
+      setSaveError(true);
     }
     return result;
+  };
+
+  const deleteVisit = async (id) => {
+    if (!window.confirm('⚠️ ยืนยันลบประวัติการตรวจนี้?\nการลบจะลบประวัติออกจากฐานข้อมูลถาวร ไม่สามารถกู้คืนได้')) return;
+    setVisits(prev => prev.filter(v => v.id !== id));
+    await supa.delete('visits', 'id', id);
   };
 
   const saveReceipt = async (r) => {
@@ -732,13 +723,11 @@ END $$;`}</pre>
       {/* ── Save Error Banner */}
       {saveError&&(
         <div style={{position:'fixed',bottom:0,left:0,right:0,background:'#c0392b',color:'#fff',padding:'14px 20px',zIndex:9997,display:'flex',alignItems:'center',justifyContent:'space-between',fontSize:14,boxShadow:'0 -4px 20px rgba(0,0,0,0.3)'}}>
-          <div style={{flex:1,minWidth:0}}>
-            <b>⚠️ ไม่สามารถบันทึกลงฐานข้อมูลได้ — ข้อมูลจะหายเมื่อรีเฟรช</b>
-            {typeof saveError === 'string' && saveError !== 'true' && (
-              <div style={{fontSize:11,marginTop:4,opacity:0.9,fontFamily:'monospace',wordBreak:'break-all'}}>สาเหตุ: {saveError}</div>
-            )}
+          <div>
+            <b>⚠️ ไม่สามารถบันทึกลงฐานข้อมูลได้</b>
+            <span style={{marginLeft:12,opacity:0.9}}>ข้อมูลอยู่ในหน้าจอ แต่จะหายเมื่อรีเฟรช — กรุณาตรวจสอบ Console (F12)</span>
           </div>
-          <button onClick={()=>setSaveError(false)} style={{background:'rgba(255,255,255,0.2)',border:'none',color:'#fff',borderRadius:6,padding:'6px 14px',cursor:'pointer',fontSize:13,marginLeft:12,flexShrink:0}}>ปิด</button>
+          <button onClick={()=>setSaveError(false)} style={{background:'rgba(255,255,255,0.2)',border:'none',color:'#fff',borderRadius:6,padding:'6px 14px',cursor:'pointer',fontSize:13}}>ปิด</button>
         </div>
       )}
       {/* HEADER */}
@@ -770,7 +759,7 @@ END $$;`}</pre>
       {/* CONTENT */}
       <div style={{padding:'20px 20px 40px',maxWidth:1200,margin:'0 auto'}}>
         {page==='dashboard' && <DashboardPage todayVisits={todayVisits} todayAppoints={todayAppoints} lowStock={lowStock} monthRevenue={monthRevenue} patients={patients} visits={visits} appointments={appointments} medicines={medicines} today={todayStr} />}
-        {page==='register' && <RegisterPage patients={patients} savePatient={savePatient} visits={visits} saveVisit={saveVisit} nextHN={nextHN} nextVID={nextVID} setPage={setPage} getVisitsForHN={getVisitsForHN} getPatient={getPatient} treatmentServices={treatmentServices} />}
+        {page==='register' && <RegisterPage patients={patients} savePatient={savePatient} visits={visits} saveVisit={saveVisit} deleteVisit={deleteVisit} nextHN={nextHN} nextVID={nextVID} setPage={setPage} getVisitsForHN={getVisitsForHN} getPatient={getPatient} treatmentServices={treatmentServices} />}
         {page==='examine' && <ExaminePage patients={patients} visits={visits} saveVisit={saveVisit} nextVID={nextVID} getPatient={getPatient} getVisitsForHN={getVisitsForHN} setCertModal={setCertModal} setReceiptModal={setReceiptModal} setAppointModal={setAppointModal} medicines={medicines} patchMedicineStock={patchMedicineStock} treatmentServices={treatmentServices} receipts={receipts} saveReceipt={saveReceipt} nextRID={nextRID} today={todayStr} />}
         {page==='cert' && <CertPage patients={patients} visits={visits} getPatient={getPatient} />}
         {page==='receipt' && <ReceiptPage receipts={receipts} saveReceipt={saveReceipt} updateReceipt={updateReceipt} deleteReceipt={deleteReceipt} patients={patients} visits={visits} nextRID={nextRID} getPatient={getPatient} medicines={medicines} patchMedicineStock={patchMedicineStock} />}
@@ -986,132 +975,133 @@ function printQueueTicket(qNum, pat, cc) {
 function printBlankMedRecord() {
   const now = new Date();
   const dateStr = `${now.getDate()}/${now.getMonth()+1}/${now.getFullYear()+543}`;
-  const win = window.open('','_blank','width=850,height:1100');
-  win.document.write(`<!DOCTYPE html><html><head><title>แบบฟอร์มเวชระเบียน</title>
+  const win = window.open('','_blank','width=850,height=1100');
+  win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"/><title>แบบฟอร์มเวชระเบียน</title>
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700&display=swap');
     *{box-sizing:border-box;margin:0;padding:0;}
-    body{font-family:'Sarabun',sans-serif;font-size:12pt;color:#111;padding:18px 24px;}
-    .header{text-align:center;border-bottom:2.5px solid #1a5276;padding-bottom:8px;margin-bottom:12px;}
-    .clinic-name{font-size:15pt;font-weight:700;color:#1a5276;}
-    .clinic-sub{font-size:10pt;color:#444;margin-top:2px;}
-    .form-title{font-size:13pt;font-weight:700;text-align:center;margin:10px 0 12px;background:#1a5276;color:#fff;padding:5px;border-radius:4px;}
-    .section{background:#f0f5fb;border:1px solid #b0c4d8;border-radius:6px;padding:10px 14px;margin-bottom:10px;}
-    .section-title{font-weight:700;font-size:11pt;color:#1a5276;margin-bottom:8px;border-bottom:1px solid #b0c4d8;padding-bottom:4px;}
-    .row{display:flex;gap:12px;margin-bottom:8px;align-items:flex-start;}
+    html,body{height:100%;overflow:visible;}
+    body{font-family:'Sarabun',sans-serif;font-size:9.5pt;color:#111;padding:8px 12px;}
+    .header{display:flex;align-items:center;gap:10px;border-bottom:2px solid #1a5276;padding-bottom:5px;margin-bottom:5px;}
+    .header-text{flex:1;}
+    .clinic-name{font-size:13pt;font-weight:700;color:#1a5276;line-height:1.2;}
+    .clinic-sub{font-size:8pt;color:#555;margin-top:1px;}
+    .form-title{font-size:10pt;font-weight:700;text-align:center;margin:4px 0 5px;background:#1a5276;color:#fff;padding:3px;border-radius:3px;}
+    .section{background:#f0f5fb;border:1px solid #b0c4d8;border-radius:4px;padding:5px 8px;margin-bottom:5px;}
+    .section-title{font-weight:700;font-size:8.5pt;color:#1a5276;margin-bottom:4px;border-bottom:1px solid #b0c4d8;padding-bottom:2px;}
+    .row{display:flex;gap:8px;margin-bottom:4px;align-items:flex-end;}
     .field{flex:1;}
-    .field-label{font-weight:600;font-size:10pt;color:#333;margin-bottom:2px;}
-    .field-line{border-bottom:1.5px solid #666;min-height:20px;padding:1px 4px;}
-    .field-box{border:1px solid #999;border-radius:4px;min-height:26px;padding:2px 6px;}
-    .vitals-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:4px;}
-    .vital-item{}
-    .lines-block{border:1px solid #999;border-radius:4px;padding:6px 8px;}
-    .blank-line{border-bottom:1px solid #aaa;min-height:22px;margin-bottom:6px;}
-    .blank-line-tall{border-bottom:1px solid #aaa;min-height:28px;margin-bottom:6px;}
-    .drug-table{width:100%;border-collapse:collapse;font-size:10pt;}
-    .drug-table th{background:#1a5276;color:#fff;padding:5px 7px;text-align:left;}
-    .drug-table td{border:1px solid #ccc;padding:5px 7px;min-height:22px;}
-    .drug-table tr.data-row td{height:26px;}
-    .sign-block{display:flex;gap:24px;margin-top:8px;justify-content:flex-end;}
-    .sign-box{text-align:center;width:180px;}
-    .sign-line{border-bottom:1px solid #555;height:36px;margin-bottom:4px;}
-    .sign-label{font-size:9.5pt;color:#555;}
-    .note-box{border:1.5px solid #1a5276;border-radius:6px;padding:8px 12px;min-height:70px;margin-bottom:6px;background:#fffdf5;}
-    .allergy-box{background:#fff0f0;border:2px solid #c0392b;border-radius:5px;padding:6px 10px;margin-bottom:10px;}
-    .allergy-label{font-weight:700;color:#c0392b;font-size:11pt;}
-    .footer{margin-top:12px;font-size:9pt;color:#888;text-align:center;border-top:1px dashed #ccc;padding-top:6px;}
-    @media print{body{padding:10px 16px;}button{display:none!important;}}
+    .field-label{font-weight:600;font-size:7.5pt;color:#444;margin-bottom:1px;white-space:nowrap;}
+    .field-line{border-bottom:1px solid #777;min-height:14px;padding:0 2px;}
+    .vitals-grid{display:grid;grid-template-columns:repeat(8,1fr);gap:5px;margin-bottom:3px;}
+    .vital-item .unit{font-size:7pt;color:#666;margin-top:0;}
+    .lines-block{border:1px solid #bbb;border-radius:3px;padding:3px 6px;}
+    .blank-line{border-bottom:1px solid #bbb;min-height:14px;margin-bottom:3px;}
+    .drug-table{width:100%;border-collapse:collapse;font-size:7.5pt;}
+    .drug-table th{background:#1a5276;color:#fff;padding:2px 4px;text-align:left;}
+    .drug-table td{border:1px solid #ccc;padding:2px 4px;height:16px;}
+    .sign-block{display:flex;gap:16px;margin-top:4px;justify-content:flex-end;}
+    .sign-box{text-align:center;width:150px;}
+    .sign-line{border-bottom:1px solid #555;height:24px;margin-bottom:2px;}
+    .sign-label{font-size:7.5pt;color:#555;}
+    .allergy-box{background:#fff0f0;border:1.5px solid #c0392b;border-radius:3px;padding:3px 7px;margin-bottom:4px;}
+    .allergy-label{font-weight:700;color:#c0392b;font-size:8pt;}
+    .note-box{border:1px solid #1a5276;border-radius:3px;padding:4px 7px;min-height:28px;background:#fffdf5;}
+    .footer{margin-top:4px;font-size:7.5pt;color:#999;text-align:center;border-top:1px dashed #ccc;padding-top:3px;}
+    .two-col{display:grid;grid-template-columns:1fr 1fr;gap:6px;}
+    @page{size:A4 portrait;margin:0;}
+    @media print{
+      *{-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+      body{padding:8px 12px;}
+      button{display:none!important;}
+      html,body{height:auto;overflow:visible;}
+    }
   </style></head><body>
   <div class="header">
-    <img src="${CLINIC_LOGO}" alt="logo" style="height:52px;vertical-align:middle;margin-right:10px;"/>
-    <div class="clinic-name">${CLINIC_NAME}</div>
-    <div class="clinic-sub">${CLINIC_ADDRESS} &nbsp;|&nbsp; โทร. ${CLINIC_TEL}</div>
-    <div class="clinic-sub">แพทย์ผู้ดูแล: ${DOCTOR_NAME} &nbsp;|&nbsp; ใบอนุญาต ${DOCTOR_LICENSE}</div>
+    <img src="${CLINIC_LOGO}" alt="logo" style="height:40px;flex-shrink:0;"/>
+    <div class="header-text">
+      <div class="clinic-name">${CLINIC_NAME}</div>
+      <div class="clinic-sub">${CLINIC_ADDRESS} | โทร. ${CLINIC_TEL}</div>
+      <div class="clinic-sub">แพทย์: ${DOCTOR_NAME} | ใบอนุญาต ${DOCTOR_LICENSE}</div>
+    </div>
+    <div style="text-align:right;font-size:8pt;color:#555;flex-shrink:0;">
+      วันที่: <b>${dateStr}</b><br/>เวลา: ________ น.<br/>คิวที่: ________
+    </div>
   </div>
 
-  <div class="form-title">📋 ใบบันทึกการตรวจรักษา (กรณีฉุกเฉิน / ระบบขัดข้อง)</div>
+  <div class="form-title">📋 ใบบันทึกการตรวจรักษา — ฉุกเฉิน/ออฟไลน์</div>
 
-  <!-- Patient Info -->
+  <!-- Patient Info (compact 2-row) -->
   <div class="section">
     <div class="section-title">ข้อมูลผู้ป่วย</div>
     <div class="row">
-      <div class="field" style="flex:0.6"><div class="field-label">HN (เลขเวชระเบียน)</div><div class="field-line"></div></div>
-      <div class="field" style="flex:0.5"><div class="field-label">วันที่</div><div class="field-line">${dateStr}</div></div>
-      <div class="field" style="flex:0.5"><div class="field-label">เวลา</div><div class="field-line"></div></div>
-      <div class="field" style="flex:0.4"><div class="field-label">คิวที่</div><div class="field-line"></div></div>
+      <div class="field" style="flex:0.35"><div class="field-label">HN</div><div class="field-line"></div></div>
+      <div class="field" style="flex:0.3"><div class="field-label">คำนำหน้า</div><div class="field-line"></div></div>
+      <div class="field" style="flex:1.2"><div class="field-label">ชื่อ</div><div class="field-line"></div></div>
+      <div class="field" style="flex:1.2"><div class="field-label">นามสกุล</div><div class="field-line"></div></div>
+      <div class="field" style="flex:0.4"><div class="field-label">อายุ</div><div class="field-line"></div></div>
+      <div class="field" style="flex:0.35"><div class="field-label">เพศ</div><div class="field-line"></div></div>
+      <div class="field" style="flex:0.3"><div class="field-label">หมู่เลือด</div><div class="field-line"></div></div>
     </div>
     <div class="row">
-      <div class="field" style="flex:0.4"><div class="field-label">คำนำหน้า</div><div class="field-line"></div></div>
-      <div class="field" style="flex:1.5"><div class="field-label">ชื่อ</div><div class="field-line"></div></div>
-      <div class="field" style="flex:1.5"><div class="field-label">นามสกุล</div><div class="field-line"></div></div>
-    </div>
-    <div class="row">
-      <div class="field"><div class="field-label">วันเกิด</div><div class="field-line"></div></div>
-      <div class="field"><div class="field-label">อายุ</div><div class="field-line"></div></div>
-      <div class="field"><div class="field-label">เพศ</div><div class="field-line"></div></div>
-      <div class="field"><div class="field-label">หมู่เลือด</div><div class="field-line"></div></div>
-      <div class="field"><div class="field-label">น้ำหนัก (กก.)</div><div class="field-line"></div></div>
-      <div class="field"><div class="field-label">ส่วนสูง (ซม.)</div><div class="field-line"></div></div>
-    </div>
-    <div class="row">
-      <div class="field"><div class="field-label">เลขบัตรประชาชน</div><div class="field-line"></div></div>
-      <div class="field"><div class="field-label">เบอร์โทรศัพท์</div><div class="field-line"></div></div>
-      <div class="field" style="flex:2"><div class="field-label">ที่อยู่</div><div class="field-line"></div></div>
-    </div>
-    <div class="row">
-      <div class="field" style="flex:2"><div class="field-label">โรคประจำตัว (Underlying disease)</div><div class="field-line"></div></div>
-      <div class="field" style="flex:2"><div class="field-label">ยาประจำที่ใช้อยู่ (Current medication)</div><div class="field-line"></div></div>
+      <div class="field" style="flex:0.9"><div class="field-label">เลขบัตรประชาชน</div><div class="field-line"></div></div>
+      <div class="field" style="flex:0.6"><div class="field-label">เบอร์โทร</div><div class="field-line"></div></div>
+      <div class="field" style="flex:0.45"><div class="field-label">น้ำหนัก (กก.)</div><div class="field-line"></div></div>
+      <div class="field" style="flex:0.45"><div class="field-label">ส่วนสูง (ซม.)</div><div class="field-line"></div></div>
+      <div class="field" style="flex:1"><div class="field-label">โรคประจำตัว</div><div class="field-line"></div></div>
+      <div class="field" style="flex:1"><div class="field-label">ยาประจำ</div><div class="field-line"></div></div>
     </div>
     <div class="allergy-box">
-      <div class="allergy-label">⚠️ แพ้ยา / แพ้อาหาร (ALLERGY): &nbsp;<span style="font-weight:400;font-size:11pt;">____________________________________________________</span></div>
+      <span class="allergy-label">⚠️ แพ้ยา/อาหาร: </span>
+      <span style="font-size:8.5pt">_______________________________________________</span>
     </div>
   </div>
 
-  <!-- Vital Signs -->
-  <div class="section">
-    <div class="section-title">🔴 สัญญาณชีพ (Vital Signs) — บันทึกโดยพยาบาล/เจ้าหน้าที่</div>
-    <div class="vitals-grid">
-      <div class="vital-item"><div class="field-label">ความดันโลหิต (BP)</div><div class="field-line"></div><div style="font-size:9pt;color:#666">mmHg</div></div>
-      <div class="vital-item"><div class="field-label">ชีพจร (PR)</div><div class="field-line"></div><div style="font-size:9pt;color:#666">ครั้ง/นาที</div></div>
-      <div class="vital-item"><div class="field-label">อัตราหายใจ (RR)</div><div class="field-line"></div><div style="font-size:9pt;color:#666">/นาที</div></div>
-      <div class="vital-item"><div class="field-label">อุณหภูมิ (Temp)</div><div class="field-line"></div><div style="font-size:9pt;color:#666">°C</div></div>
-      <div class="vital-item"><div class="field-label">SpO₂</div><div class="field-line"></div><div style="font-size:9pt;color:#666">%</div></div>
-      <div class="vital-item"><div class="field-label">น้ำหนัก</div><div class="field-line"></div><div style="font-size:9pt;color:#666">กก.</div></div>
-      <div class="vital-item"><div class="field-label">ส่วนสูง</div><div class="field-line"></div><div style="font-size:9pt;color:#666">ซม.</div></div>
-      <div class="vital-item"><div class="field-label">BMI</div><div class="field-line"></div><div style="font-size:9pt;color:#666">กก./ม.²</div></div>
+  <!-- Vitals + Clinical in two columns -->
+  <div class="two-col" style="margin-bottom:5px;">
+    <!-- LEFT: Vitals -->
+    <div class="section" style="margin-bottom:0;">
+      <div class="section-title">🔴 สัญญาณชีพ (Vital Signs)</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 8px;">
+        <div><div class="field-label">BP (mmHg)</div><div class="field-line"></div></div>
+        <div><div class="field-label">PR (ครั้ง/นาที)</div><div class="field-line"></div></div>
+        <div><div class="field-label">Temp (°C)</div><div class="field-line"></div></div>
+        <div><div class="field-label">RR (/นาที)</div><div class="field-line"></div></div>
+        <div><div class="field-label">SpO₂ (%)</div><div class="field-line"></div></div>
+        <div><div class="field-label">BMI</div><div class="field-line"></div></div>
+      </div>
+      <div class="row" style="margin-top:4px;margin-bottom:0;">
+        <div class="field"><div class="field-label">บันทึกโดย (พยาบาล)</div><div class="field-line"></div></div>
+      </div>
     </div>
-    <div class="row" style="margin-top:6px">
-      <div class="field"><div class="field-label">บันทึกโดย (พยาบาล)</div><div class="field-line"></div></div>
+    <!-- RIGHT: CC + PI -->
+    <div class="section" style="margin-bottom:0;">
+      <div class="section-title">📝 ซักประวัติ</div>
+      <div style="margin-bottom:4px;">
+        <div class="field-label">CC. อาการสำคัญ</div>
+        <div class="lines-block"><div class="blank-line"></div><div class="blank-line" style="margin-bottom:0;"></div></div>
+      </div>
+      <div>
+        <div class="field-label">PI. ประวัติการเจ็บป่วยปัจจุบัน</div>
+        <div class="lines-block"><div class="blank-line"></div><div class="blank-line"></div><div class="blank-line" style="margin-bottom:0;"></div></div>
+      </div>
     </div>
   </div>
 
-  <!-- Clinical Notes -->
+  <!-- PE -->
   <div class="section">
-    <div class="section-title">📝 บันทึกทางคลินิก</div>
-    <div style="margin-bottom:10px">
-      <div class="field-label">CC. อาการที่นำมาพบแพทย์ (Chief Complaint)</div>
-      <div class="lines-block"><div class="blank-line"></div><div class="blank-line"></div></div>
+    <div class="section-title">🩺 PE. ตรวจร่างกาย (Physical Examination)</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:3px 12px;">
+      <div style="display:flex;align-items:baseline;gap:4px;"><span style="font-weight:600;font-size:8pt;white-space:nowrap;">General: </span><div class="field-line" style="flex:1;"></div></div>
+      <div style="display:flex;align-items:baseline;gap:4px;"><span style="font-weight:600;font-size:8pt;white-space:nowrap;">HEENT: </span><div class="field-line" style="flex:1;"></div></div>
+      <div style="display:flex;align-items:baseline;gap:4px;"><span style="font-weight:600;font-size:8pt;white-space:nowrap;">Lung: </span><div class="field-line" style="flex:1;"></div></div>
+      <div style="display:flex;align-items:baseline;gap:4px;"><span style="font-weight:600;font-size:8pt;white-space:nowrap;">Heart: </span><div class="field-line" style="flex:1;"></div></div>
+      <div style="display:flex;align-items:baseline;gap:4px;"><span style="font-weight:600;font-size:8pt;white-space:nowrap;">Abdomen: </span><div class="field-line" style="flex:1;"></div></div>
+      <div style="display:flex;align-items:baseline;gap:4px;"><span style="font-weight:600;font-size:8pt;white-space:nowrap;">Extremities: </span><div class="field-line" style="flex:1;"></div></div>
     </div>
-    <div style="margin-bottom:10px">
-      <div class="field-label">PI. ประวัติการเจ็บป่วยปัจจุบัน (Present Illness)</div>
-      <div class="lines-block"><div class="blank-line"></div><div class="blank-line"></div><div class="blank-line"></div></div>
-    </div>
-    <div style="margin-bottom:10px">
-      <div class="field-label">PE. ตรวจร่างกาย (Physical Examination)</div>
-      <div class="lines-block">
-        <div style="margin-bottom:5px"><span style="font-weight:600;font-size:10pt">General appearance: </span><div class="blank-line" style="display:inline-block;width:calc(100% - 160px);vertical-align:bottom"></div></div>
-        <div style="margin-bottom:5px"><span style="font-weight:600;font-size:10pt">HEENT: </span><div class="blank-line" style="display:inline-block;width:calc(100% - 70px);vertical-align:bottom"></div></div>
-        <div style="margin-bottom:5px"><span style="font-weight:600;font-size:10pt">Lung: </span><div class="blank-line" style="display:inline-block;width:calc(100% - 58px);vertical-align:bottom"></div></div>
-        <div style="margin-bottom:5px"><span style="font-weight:600;font-size:10pt">Heart: </span><div class="blank-line" style="display:inline-block;width:calc(100% - 60px);vertical-align:bottom"></div></div>
-        <div style="margin-bottom:5px"><span style="font-weight:600;font-size:10pt">Abdomen: </span><div class="blank-line" style="display:inline-block;width:calc(100% - 82px);vertical-align:bottom"></div></div>
-        <div><span style="font-weight:600;font-size:10pt">Extremities: </span><div class="blank-line" style="display:inline-block;width:calc(100% - 100px);vertical-align:bottom"></div></div>
-      </div>
-    </div>
-    <div class="row">
-      <div class="field">
-        <div class="field-label">DX. การวินิจฉัย (Diagnosis)</div>
-        <div class="lines-block"><div class="blank-line"></div><div class="blank-line"></div></div>
-      </div>
+    <div style="margin-top:4px;">
+      <div class="field-label">DX. การวินิจฉัย (Diagnosis)</div>
+      <div class="lines-block"><div class="blank-line"></div><div class="blank-line" style="margin-bottom:0;"></div></div>
     </div>
   </div>
 
@@ -1119,85 +1109,48 @@ function printBlankMedRecord() {
   <div class="section">
     <div class="section-title">💊 การรักษาและยาที่สั่ง (Treatment &amp; Medication)</div>
     <table class="drug-table">
-      <thead>
-        <tr>
-          <th style="width:38%">ชื่อยา / หัตถการ / ค่าบริการ</th>
-          <th style="width:10%">จำนวน</th>
-          <th style="width:10%">หน่วย</th>
-          <th style="width:30%">วิธีใช้ / คำอธิบาย</th>
-          <th style="width:12%">ราคา (บ.)</th>
-        </tr>
-      </thead>
+      <thead><tr>
+        <th style="width:40%">ชื่อยา / หัตถการ / ค่าบริการ</th>
+        <th style="width:10%">จำนวน</th>
+        <th style="width:10%">หน่วย</th>
+        <th style="width:28%">วิธีใช้ / คำอธิบาย</th>
+        <th style="width:12%">ราคา (บ.)</th>
+      </tr></thead>
       <tbody>
-        ${Array.from({length:8}).map(()=>'<tr class="data-row"><td>&nbsp;</td><td></td><td></td><td></td><td></td></tr>').join('')}
+        ${Array.from({length:6}).map(()=>'<tr><td>&nbsp;</td><td></td><td></td><td></td><td></td></tr>').join('')}
       </tbody>
     </table>
-    <div style="text-align:right;margin-top:6px;font-size:10pt">
-      <span style="font-weight:600">รวมทั้งสิ้น: </span>
-      <span style="border-bottom:1px solid #555;display:inline-block;width:100px;text-align:center">&nbsp;</span>
-      <span> บาท</span>
-    </div>
-    <div style="margin-top:10px">
-      <div class="field-label">TX. คำสั่งการรักษาเพิ่มเติม / คำแนะนำ (Additional orders / Advice)</div>
-      <div class="lines-block">
-        <div class="blank-line"></div>
-        <div class="blank-line"></div>
-        <div class="blank-line"></div>
-        <div class="blank-line"></div>
-      </div>
-    </div>
-    <div style="margin-top:10px">
-      <div class="field-label">หัตถการ / Procedures performed</div>
-      <div class="lines-block">
-        <div class="blank-line-tall"></div>
-        <div class="blank-line-tall"></div>
-      </div>
+    <div style="text-align:right;margin-top:3px;font-size:8.5pt;">รวมทั้งสิ้น: <span style="border-bottom:1px solid #555;display:inline-block;width:80px;text-align:center;">&nbsp;</span> บาท</div>
+    <div style="margin-top:4px;">
+      <div class="field-label">TX. คำสั่งรักษา / คำแนะนำ &amp; หัตถการ</div>
+      <div class="lines-block"><div class="blank-line"></div><div class="blank-line"></div><div class="blank-line" style="margin-bottom:0;"></div></div>
     </div>
   </div>
 
-  <!-- Notes & Follow-up -->
-  <div class="section">
-    <div class="section-title">📌 บันทึกเพิ่มเติมและการนัดหมาย</div>
-    <div class="row">
-      <div class="field">
-        <div class="field-label">นัดตรวจครั้งต่อไป (Follow-up date)</div>
-        <div class="field-line"></div>
+  <!-- Follow-up + Signatures in one row -->
+  <div style="display:flex;gap:8px;align-items:flex-start;margin-bottom:4px;">
+    <div class="section" style="flex:1;margin-bottom:0;">
+      <div class="section-title">📌 นัดหมาย &amp; หมายเหตุ</div>
+      <div class="row">
+        <div class="field"><div class="field-label">นัดตรวจครั้งต่อไป</div><div class="field-line"></div></div>
+        <div class="field"><div class="field-label">ลาป่วย (วัน)</div><div class="field-line"></div></div>
       </div>
-      <div class="field">
-        <div class="field-label">ลาป่วย (จำนวนวัน)</div>
-        <div class="field-line"></div>
-      </div>
-      <div class="field" style="flex:2">
-        <div class="field-label">หมายเหตุ (Note)</div>
-        <div class="field-line"></div>
-      </div>
-    </div>
-    <div style="margin-top:8px">
-      <div class="field-label">บันทึกเพิ่มเติมของแพทย์ (Additional clinical notes)</div>
+      <div class="field-label" style="margin-top:3px;">หมายเหตุเพิ่มเติม</div>
       <div class="note-box"></div>
     </div>
-  </div>
-
-  <!-- Signatures -->
-  <div class="sign-block">
-    <div class="sign-box">
-      <div class="sign-line"></div>
-      <div class="sign-label">ลายมือชื่อผู้ป่วย / ผู้แทน</div>
-    </div>
-    <div class="sign-box">
-      <div class="sign-line"></div>
-      <div class="sign-label">ลายมือชื่อพยาบาล</div>
-    </div>
-    <div class="sign-box">
-      <div class="sign-line"></div>
-      <div class="sign-label">ลายมือชื่อแพทย์ (${DOCTOR_NAME})</div>
+    <div style="flex-shrink:0;">
+      <div class="sign-block" style="margin-top:0;flex-direction:column;gap:10px;">
+        <div class="sign-box"><div class="sign-line"></div><div class="sign-label">ลายมือชื่อผู้ป่วย / ผู้แทน</div></div>
+        <div class="sign-box"><div class="sign-line"></div><div class="sign-label">ลายมือชื่อพยาบาล</div></div>
+        <div class="sign-box"><div class="sign-line"></div><div class="sign-label">ลายมือชื่อแพทย์ (${DOCTOR_NAME})</div></div>
+      </div>
     </div>
   </div>
 
-  <div class="footer">${CLINIC_NAME} | ${CLINIC_ADDRESS} | โทร. ${CLINIC_TEL} &nbsp;—&nbsp; แบบฟอร์มฉุกเฉิน พิมพ์: ${dateStr}</div>
+  <div class="footer">${CLINIC_NAME} | ${CLINIC_ADDRESS} | โทร. ${CLINIC_TEL} — แบบฟอร์มฉุกเฉิน พิมพ์: ${dateStr}</div>
 
-  <div style="text-align:center;margin-top:12px;">
-    <button onclick="window.print()" style="padding:8px 24px;background:#1a5276;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px;font-family:'Sarabun',sans-serif;font-weight:700;">🖨️ พิมพ์แบบฟอร์ม</button>
+  <div style="text-align:center;margin-top:8px;">
+    <button onclick="window.print()" style="padding:6px 20px;background:#1a5276;color:#fff;border:none;border-radius:5px;cursor:pointer;font-size:12px;font-family:'Sarabun',sans-serif;font-weight:700;">🖨️ พิมพ์แบบฟอร์ม</button>
   </div>
   </body></html>`);
   win.document.close();
@@ -1205,7 +1158,7 @@ function printBlankMedRecord() {
 }
 
 // ===================== REGISTER / MEDICAL RECORD =====================
-function RegisterPage({patients,savePatient,visits,saveVisit,nextHN,nextVID,setPage,getVisitsForHN,getPatient,treatmentServices}) {
+function RegisterPage({patients,savePatient,visits,saveVisit,deleteVisit,nextHN,nextVID,setPage,getVisitsForHN,getPatient,treatmentServices}) {
   const [subpage, setSubpage] = useState('list');
   const [search, setSearch] = useState('');
   const [form, setForm] = useState({
@@ -1376,7 +1329,7 @@ function RegisterPage({patients,savePatient,visits,saveVisit,nextHN,nextVID,setP
         </div>
       )}
       {subpage==='detail' && selectedPat && (
-        <PatientDetail pat={selectedPat} visits={getVisitsForHN(selectedPat.hn)} onBack={()=>setSubpage('list')} patients={patients} savePatient={savePatient} treatmentServices={treatmentServices} saveVisit={saveVisit} nextVID={nextVID} allVisits={visits} />
+        <PatientDetail pat={selectedPat} visits={getVisitsForHN(selectedPat.hn)} onBack={()=>setSubpage('list')} patients={patients} savePatient={savePatient} treatmentServices={treatmentServices} saveVisit={saveVisit} deleteVisit={deleteVisit} nextVID={nextVID} allVisits={visits} />
       )}
     </div>
   );
@@ -1453,7 +1406,7 @@ function PatientForm({form,setForm}) {
   );
 }
 
-function PatientDetail({pat,visits,onBack,patients,savePatient,treatmentServices,saveVisit,nextVID,allVisits}) {
+function PatientDetail({pat,visits,onBack,patients,savePatient,treatmentServices,saveVisit,deleteVisit,nextVID,allVisits}) {
   const [tab,setTab]=useState('info');
   const [editing,setEditing]=useState(false);
   const [form,setForm]=useState({...pat});
@@ -1644,6 +1597,18 @@ function PatientDetail({pat,visits,onBack,patients,savePatient,treatmentServices
                       : <button className="btn btn-outline btn-sm no-print" onClick={()=>startEditVisit(v)}>✏️ แก้ไข</button>
                   )}
                   <button className="btn btn-print btn-sm no-print" onClick={()=>doPrint(`visit-card-${v.id}`,'บันทึกการตรวจ Visit '+v.id)}>🖨️ พิมพ์</button>
+                  {deleteVisit&&editingVisit!==v.id&&(
+                    <button
+                      className="btn btn-sm no-print"
+                      style={{background:'#e74c3c',color:'#fff',border:'none',minWidth:54}}
+                      title="ลบประวัติการตรวจนี้"
+                      onClick={async()=>{
+                        if(!window.confirm(`⚠️ ลบประวัติการตรวจนี้?\n\nVisit ID: ${v.id}\nวันที่: ${thaiDate(v.date)}${v.cc?'  CC: '+v.cc:''}\n\nไม่สามารถกู้คืนได้`)) return;
+                        await deleteVisit(v.id);
+                        if(visitPage>1 && pagedVisits.length===1) setVisitPage(p=>Math.max(1,p-1));
+                      }}
+                    >🗑️ ลบ</button>
+                  )}
                 </div>
               </div>
               {editingVisit===v.id && editVform
