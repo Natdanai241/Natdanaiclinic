@@ -1,4 +1,13 @@
 "use strict";
+var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
+    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
+    return new (P || (P = Promise))(function (resolve, reject) {
+        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
+        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
+        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
+        step((generator = generator.apply(thisArg, _arguments || [])).next());
+    });
+};
 const { useState, useEffect, useRef } = React;
 // ===================== SUPABASE CONFIG =====================
 const SUPA_URL = "https://ggshgsyoytrkbnepsryu.supabase.co";
@@ -15,10 +24,17 @@ const supa = {
         return out;
     },
     // ── Learn a bad column and cache it
+    // FIX: Supabase returns JSON where Postgres wraps identifiers in " which becomes
+    // \" (escaped) in the JSON string. The regex must run on the *parsed* message,
+    // not the raw JSON text — otherwise it never matches and retries never fire.
     _learnBadCol(table, errText) {
-        // FIX: Parse JSON first so the regex sees real " not JSON-escaped \"
         let msg = errText;
-        try { const e = JSON.parse(errText); if (e.message) msg = e.message; } catch(_) {}
+        try {
+            const e = JSON.parse(errText);
+            if (e.message)
+                msg = e.message;
+        }
+        catch (_) { }
         const colMatch = msg.match(/column "([^"]+)" of relation/);
         if (!colMatch)
             return null;
@@ -48,166 +64,176 @@ const supa = {
         return false;
     },
     // ── Generic fetch all rows from a table
-    async getAll(table) {
-        try {
-            const r = await fetch(`${SUPA_URL}/rest/v1/${table}?order=created_at.asc`, { headers: this.headers });
-            if (!r.ok) {
-                console.error(`getAll ${table}:`, await r.text());
+    getAll(table) {
+        return __awaiter(this, void 0, void 0, function* () {
+            try {
+                const r = yield fetch(`${SUPA_URL}/rest/v1/${table}?order=created_at.asc`, { headers: this.headers });
+                if (!r.ok) {
+                    console.error(`getAll ${table}:`, yield r.text());
+                    return null;
+                }
+                return r.json();
+            }
+            catch (e) {
+                console.error(`getAll ${table} network error:`, e);
                 return null;
             }
-            return r.json();
-        }
-        catch (e) {
-            console.error(`getAll ${table} network error:`, e);
-            return null;
-        }
+        });
     },
     // ── INSERT a single row (POST), retry on column mismatch up to 10 times
-    async insert(table, data, _depth) {
-        _depth = _depth || 0;
-        const body = this._strip(table, data);
-        try {
-            const r = await fetch(`${SUPA_URL}/rest/v1/${table}`, {
-                method: "POST",
-                headers: Object.assign(Object.assign({}, this.headers), { "Prefer": "return=representation" }),
-                body: JSON.stringify(body),
-            });
-            if (!r.ok) {
-                const errText = await r.text();
-                console.error(`insert ${table} [HTTP ${r.status}]:`, errText);
-                if (this._isRlsError(r.status, errText)) {
-                    console.error(`insert ${table}: RLS/permission error — add INSERT policy for anon role`);
-                    return 'RLS_ERROR';
-                }
-                if (_depth < 10 && this._learnBadCol(table, errText)) {
-                    return this.insert(table, data, _depth + 1);
-                }
-                return null;
-            }
-            return r.json();
-        }
-        catch (e) {
-            console.error(`insert ${table} network error:`, e);
-            return null;
-        }
-    },
-    // ── PATCH (update) by primary key, retry on column mismatch
-    async patch(table, pkCol, pkVal, data, _depth) {
-        _depth = _depth || 0;
-        const body = this._strip(table, data);
-        try {
-            const r = await fetch(`${SUPA_URL}/rest/v1/${table}?${pkCol}=eq.${pkVal}`, {
-                method: "PATCH",
-                headers: Object.assign(Object.assign({}, this.headers), { "Prefer": "return=representation" }),
-                body: JSON.stringify(body),
-            });
-            if (!r.ok) {
-                const errText = await r.text();
-                console.error(`patch ${table} [HTTP ${r.status}]:`, errText);
-                if (this._isRlsError(r.status, errText)) {
-                    console.error(`patch ${table}: RLS/permission error — add UPDATE policy for anon role`);
-                    return 'RLS_ERROR';
-                }
-                if (_depth < 10 && this._learnBadCol(table, errText)) {
-                    return this.patch(table, pkCol, pkVal, data, _depth + 1);
-                }
-                return null;
-            }
-            return r.json();
-        }
-        catch (e) {
-            console.error(`patch ${table} network error:`, e);
-            return null;
-        }
-    },
-    // ── Upsert: try INSERT first; if 409 conflict → PATCH instead
-    // Also handles bulk arrays (for seed data) via old merge-duplicates method
-    async upsert(table, data, _depth) {
-        _depth = _depth || 0;
-        // Bulk array path — use merge-duplicates as before
-        if (Array.isArray(data)) {
-            const body = data.map(row => this._strip(table, row));
+    insert(table, data, _depth) {
+        return __awaiter(this, void 0, void 0, function* () {
+            _depth = _depth || 0;
+            const body = this._strip(table, data);
             try {
-                const r = await fetch(`${SUPA_URL}/rest/v1/${table}`, {
+                const r = yield fetch(`${SUPA_URL}/rest/v1/${table}`, {
                     method: "POST",
-                    headers: Object.assign(Object.assign({}, this.headers), { "Prefer": "resolution=merge-duplicates,return=representation" }),
+                    headers: Object.assign(Object.assign({}, this.headers), { "Prefer": "return=representation" }),
                     body: JSON.stringify(body),
                 });
                 if (!r.ok) {
-                    const errText = await r.text();
-                    console.error(`upsert[] ${table} [HTTP ${r.status}]:`, errText);
+                    const errText = yield r.text();
+                    console.error(`insert ${table} [HTTP ${r.status}]:`, errText);
+                    if (this._isRlsError(r.status, errText)) {
+                        console.error(`insert ${table}: RLS/permission error — add INSERT policy for anon role`);
+                        return 'RLS_ERROR';
+                    }
                     if (_depth < 10 && this._learnBadCol(table, errText)) {
-                        return this.upsert(table, data, _depth + 1);
+                        return this.insert(table, data, _depth + 1);
                     }
                     return null;
                 }
                 return r.json();
             }
             catch (e) {
-                console.error(`upsert[] ${table} network:`, e);
+                console.error(`insert ${table} network error:`, e);
                 return null;
             }
-        }
-        // Single-row path: INSERT → on conflict (409 / 23505) → PATCH
-        const body = this._strip(table, data);
-        try {
-            const r = await fetch(`${SUPA_URL}/rest/v1/${table}`, {
-                method: "POST",
-                headers: Object.assign(Object.assign({}, this.headers), { "Prefer": "return=representation" }),
-                body: JSON.stringify(body),
-            });
-            if (r.ok)
-                return r.json();
-            const errText = await r.text();
-            console.error(`upsert ${table} [HTTP ${r.status}]:`, errText);
-            // RLS / permission error
-            if (this._isRlsError(r.status, errText)) {
-                console.error(`upsert ${table}: RLS/permission error — add policy for anon role`);
-                return 'RLS_ERROR';
-            }
-            // Unknown column → strip and retry insert
-            if (_depth < 10 && this._learnBadCol(table, errText)) {
-                return this.upsert(table, data, _depth + 1);
-            }
-            // Duplicate key (23505) or HTTP 409 → fall back to PATCH
-            let errObj = null;
+        });
+    },
+    // ── PATCH (update) by primary key, retry on column mismatch
+    patch(table, pkCol, pkVal, data, _depth) {
+        return __awaiter(this, void 0, void 0, function* () {
+            _depth = _depth || 0;
+            const body = this._strip(table, data);
             try {
-                errObj = JSON.parse(errText);
+                const r = yield fetch(`${SUPA_URL}/rest/v1/${table}?${pkCol}=eq.${pkVal}`, {
+                    method: "PATCH",
+                    headers: Object.assign(Object.assign({}, this.headers), { "Prefer": "return=representation" }),
+                    body: JSON.stringify(body),
+                });
+                if (!r.ok) {
+                    const errText = yield r.text();
+                    console.error(`patch ${table} [HTTP ${r.status}]:`, errText);
+                    if (this._isRlsError(r.status, errText)) {
+                        console.error(`patch ${table}: RLS/permission error — add UPDATE policy for anon role`);
+                        return 'RLS_ERROR';
+                    }
+                    if (_depth < 10 && this._learnBadCol(table, errText)) {
+                        return this.patch(table, pkCol, pkVal, data, _depth + 1);
+                    }
+                    return null;
+                }
+                return r.json();
             }
-            catch (_) { }
-            const pgCode = (errObj === null || errObj === void 0 ? void 0 : errObj.code) || '';
-            if (r.status === 409 || pgCode === '23505') {
-                console.warn(`upsert ${table}: conflict on insert, falling back to PATCH`);
-                const pkCol = 'id';
-                const pkVal = data[pkCol];
-                if (pkVal !== undefined) {
-                    return this.patch(table, pkCol, pkVal, data);
+            catch (e) {
+                console.error(`patch ${table} network error:`, e);
+                return null;
+            }
+        });
+    },
+    // ── Upsert: try INSERT first; if 409 conflict → PATCH instead
+    // Also handles bulk arrays (for seed data) via old merge-duplicates method
+    upsert(table, data, _depth) {
+        return __awaiter(this, void 0, void 0, function* () {
+            _depth = _depth || 0;
+            // Bulk array path — use merge-duplicates as before
+            if (Array.isArray(data)) {
+                const body = data.map(row => this._strip(table, row));
+                try {
+                    const r = yield fetch(`${SUPA_URL}/rest/v1/${table}`, {
+                        method: "POST",
+                        headers: Object.assign(Object.assign({}, this.headers), { "Prefer": "resolution=merge-duplicates,return=representation" }),
+                        body: JSON.stringify(body),
+                    });
+                    if (!r.ok) {
+                        const errText = yield r.text();
+                        console.error(`upsert[] ${table} [HTTP ${r.status}]:`, errText);
+                        if (_depth < 10 && this._learnBadCol(table, errText)) {
+                            return this.upsert(table, data, _depth + 1);
+                        }
+                        return null;
+                    }
+                    return r.json();
+                }
+                catch (e) {
+                    console.error(`upsert[] ${table} network:`, e);
+                    return null;
                 }
             }
-            console.error(`upsert ${table} pg_error: code=${pgCode} msg=${(errObj === null || errObj === void 0 ? void 0 : errObj.message) || errText}`);
-            return null;
-        }
-        catch (e) {
-            console.error(`upsert ${table} network:`, e);
-            return null;
-        }
+            // Single-row path: INSERT → on conflict (409 / 23505) → PATCH
+            const body = this._strip(table, data);
+            try {
+                const r = yield fetch(`${SUPA_URL}/rest/v1/${table}`, {
+                    method: "POST",
+                    headers: Object.assign(Object.assign({}, this.headers), { "Prefer": "return=representation" }),
+                    body: JSON.stringify(body),
+                });
+                if (r.ok)
+                    return r.json();
+                const errText = yield r.text();
+                console.error(`upsert ${table} [HTTP ${r.status}]:`, errText);
+                // RLS / permission error
+                if (this._isRlsError(r.status, errText)) {
+                    console.error(`upsert ${table}: RLS/permission error — add policy for anon role`);
+                    return 'RLS_ERROR';
+                }
+                // Unknown column → strip and retry insert
+                if (_depth < 10 && this._learnBadCol(table, errText)) {
+                    return this.upsert(table, data, _depth + 1);
+                }
+                // Duplicate key (23505) or HTTP 409 → fall back to PATCH
+                let errObj = null;
+                try {
+                    errObj = JSON.parse(errText);
+                }
+                catch (_) { }
+                const pgCode = (errObj === null || errObj === void 0 ? void 0 : errObj.code) || '';
+                if (r.status === 409 || pgCode === '23505') {
+                    console.warn(`upsert ${table}: conflict on insert, falling back to PATCH`);
+                    const pkCol = 'id';
+                    const pkVal = data[pkCol];
+                    if (pkVal !== undefined) {
+                        return this.patch(table, pkCol, pkVal, data);
+                    }
+                }
+                console.error(`upsert ${table} pg_error: code=${pgCode} msg=${(errObj === null || errObj === void 0 ? void 0 : errObj.message) || errText}`);
+                return null;
+            }
+            catch (e) {
+                console.error(`upsert ${table} network:`, e);
+                return null;
+            }
+        });
     },
     // ── Delete by primary key
-    async delete(table, pkCol, pkVal) {
-        try {
-            const r = await fetch(`${SUPA_URL}/rest/v1/${table}?${pkCol}=eq.${pkVal}`, {
-                method: "DELETE", headers: this.headers,
-            });
-            if (!r.ok) {
-                console.error(`delete ${table}:`, await r.text());
+    delete(table, pkCol, pkVal) {
+        return __awaiter(this, void 0, void 0, function* () {
+            try {
+                const r = yield fetch(`${SUPA_URL}/rest/v1/${table}?${pkCol}=eq.${pkVal}`, {
+                    method: "DELETE", headers: this.headers,
+                });
+                if (!r.ok) {
+                    console.error(`delete ${table}:`, yield r.text());
+                    return false;
+                }
+                return true;
+            }
+            catch (e) {
+                console.error(`delete ${table} network:`, e);
                 return false;
             }
-            return true;
-        }
-        catch (e) {
-            console.error(`delete ${table} network:`, e);
-            return false;
-        }
+        });
     },
 };
 // DB row → app shape converters (snake_case ↔ camelCase for visits/receipts)
@@ -484,10 +510,10 @@ function ClinicDashboard() {
     // ── Load all data from Supabase on mount
     useEffect(() => {
         let cancelled = false;
-        const load = async () => {
+        const load = () => __awaiter(this, void 0, void 0, function* () {
             setLoading(true);
             try {
-                const [pts, vis, apps, recs, meds, svcs] = await Promise.all([
+                const [pts, vis, apps, recs, meds, svcs] = yield Promise.all([
                     supa.getAll('patients'),
                     supa.getAll('visits'),
                     supa.getAll('appointments'),
@@ -534,7 +560,7 @@ function ClinicDashboard() {
                 if (!cancelled)
                     setLoading(false);
             }
-        };
+        });
         load();
         return () => { cancelled = true; };
     }, []);
@@ -542,26 +568,26 @@ function ClinicDashboard() {
     useEffect(() => {
         if (!dbReady)
             return;
-        const seed = async () => {
-            const pts = await supa.getAll('patients');
+        const seed = () => __awaiter(this, void 0, void 0, function* () {
+            const pts = yield supa.getAll('patients');
             if (pts && pts.length === 0) {
-                await supa.upsert('patients', SAMPLE_PATIENTS);
-                await supa.upsert('medicines', SAMPLE_MEDICINES);
-                await supa.upsert('treatment_services', SAMPLE_SERVICES);
+                yield supa.upsert('patients', SAMPLE_PATIENTS);
+                yield supa.upsert('medicines', SAMPLE_MEDICINES);
+                yield supa.upsert('treatment_services', SAMPLE_SERVICES);
                 console.log('Sample data seeded to DB');
             }
-        };
+        });
         seed();
     }, [dbReady]);
     // ── CRUD helpers that update both state and DB
-    const savePatient = async (p) => {
+    const savePatient = (p) => __awaiter(this, void 0, void 0, function* () {
         setPatients(prev => {
             const exists = prev.find(x => x.hn === p.hn);
             return exists ? prev.map(x => x.hn === p.hn ? p : x) : [...prev, p];
         });
-        await supa.upsert('patients', p);
-    };
-    const saveVisit = async (v) => {
+        yield supa.upsert('patients', p);
+    });
+    const saveVisit = (v) => __awaiter(this, void 0, void 0, function* () {
         // Check BEFORE setState — setState updater runs async so can't rely on closure var
         const existedInDb = visits.some(x => x.id === v.id);
         setVisits(prev => {
@@ -571,17 +597,17 @@ function ClinicDashboard() {
         const dbRow = toDbVisit(v);
         let result;
         if (existedInDb) {
-            result = await supa.patch('visits', 'id', v.id, dbRow);
+            result = yield supa.patch('visits', 'id', v.id, dbRow);
             if (result === null) {
                 console.warn('saveVisit: PATCH failed, trying INSERT');
-                result = await supa.insert('visits', dbRow);
+                result = yield supa.insert('visits', dbRow);
             }
         }
         else {
-            result = await supa.insert('visits', dbRow);
+            result = yield supa.insert('visits', dbRow);
             if (result === null) {
                 console.warn('saveVisit: INSERT failed, trying PATCH');
-                result = await supa.patch('visits', 'id', v.id, dbRow);
+                result = yield supa.patch('visits', 'id', v.id, dbRow);
             }
         }
         if (result === 'RLS_ERROR') {
@@ -593,65 +619,65 @@ function ClinicDashboard() {
             setSaveError(true);
         }
         return result;
-    };
-    const deleteVisit = async (id) => {
+    });
+    const deleteVisit = (id) => __awaiter(this, void 0, void 0, function* () {
         if (!window.confirm('⚠️ ยืนยันลบประวัติการตรวจนี้?\nการลบจะลบประวัติออกจากฐานข้อมูลถาวร ไม่สามารถกู้คืนได้'))
             return;
         setVisits(prev => prev.filter(v => v.id !== id));
-        await supa.delete('visits', 'id', id);
-    };
-    const saveReceipt = async (r) => {
+        yield supa.delete('visits', 'id', id);
+    });
+    const saveReceipt = (r) => __awaiter(this, void 0, void 0, function* () {
         setReceipts(prev => [...prev, r]);
-        await supa.upsert('receipts', toDbReceipt(r));
-    };
+        yield supa.upsert('receipts', toDbReceipt(r));
+    });
     // Update an existing receipt (e.g. confirm payment / change payment method)
-    const updateReceipt = async (r) => {
+    const updateReceipt = (r) => __awaiter(this, void 0, void 0, function* () {
         setReceipts(prev => prev.map(x => x.id === r.id ? r : x));
-        await supa.upsert('receipts', toDbReceipt(r));
-    };
-    const deleteReceipt = async (id) => {
+        yield supa.upsert('receipts', toDbReceipt(r));
+    });
+    const deleteReceipt = (id) => __awaiter(this, void 0, void 0, function* () {
         if (!window.confirm('ยืนยันลบใบเสร็จนี้?\nการลบใบเสร็จจะไม่กระทบต่อประวัติการรักษาของผู้ป่วย'))
             return;
         setReceipts(prev => prev.filter(x => x.id !== id));
-        await supa.delete('receipts', 'id', id);
-    };
-    const saveAppointment = async (a) => {
+        yield supa.delete('receipts', 'id', id);
+    });
+    const saveAppointment = (a) => __awaiter(this, void 0, void 0, function* () {
         setAppointments(prev => {
             const exists = prev.find(x => x.id === a.id);
             return exists ? prev.map(x => x.id === a.id ? a : x) : [...prev, a];
         });
-        await supa.upsert('appointments', a);
-    };
-    const deleteAppointment = async (id) => {
+        yield supa.upsert('appointments', a);
+    });
+    const deleteAppointment = (id) => __awaiter(this, void 0, void 0, function* () {
         setAppointments(prev => prev.filter(a => a.id !== id));
-        await supa.delete('appointments', 'id', id);
-    };
-    const saveMedicine = async (m) => {
+        yield supa.delete('appointments', 'id', id);
+    });
+    const saveMedicine = (m) => __awaiter(this, void 0, void 0, function* () {
         setMedicines(prev => {
             const exists = prev.find(x => x.id === m.id);
             return exists ? prev.map(x => x.id === m.id ? m : x) : [...prev, m];
         });
-        await supa.upsert('medicines', m);
-    };
-    const deleteMedicine = async (id) => {
+        yield supa.upsert('medicines', m);
+    });
+    const deleteMedicine = (id) => __awaiter(this, void 0, void 0, function* () {
         setMedicines(prev => prev.filter(m => m.id !== id));
-        await supa.delete('medicines', 'id', id);
-    };
-    const patchMedicineStock = async (medId, newStock) => {
+        yield supa.delete('medicines', 'id', id);
+    });
+    const patchMedicineStock = (medId, newStock) => __awaiter(this, void 0, void 0, function* () {
         setMedicines(prev => prev.map(m => m.id === medId ? Object.assign(Object.assign({}, m), { stock: newStock }) : m));
-        await supa.patch('medicines', 'id', medId, { stock: newStock });
-    };
-    const saveTreatmentService = async (s) => {
+        yield supa.patch('medicines', 'id', medId, { stock: newStock });
+    });
+    const saveTreatmentService = (s) => __awaiter(this, void 0, void 0, function* () {
         setTreatmentServices(prev => {
             const exists = prev.find(x => x.id === s.id);
             return exists ? prev.map(x => x.id === s.id ? s : x) : [...prev, s];
         });
-        await supa.upsert('treatment_services', s);
-    };
-    const deleteTreatmentService = async (id) => {
+        yield supa.upsert('treatment_services', s);
+    });
+    const deleteTreatmentService = (id) => __awaiter(this, void 0, void 0, function* () {
         setTreatmentServices(prev => prev.filter(s => s.id !== id));
-        await supa.delete('treatment_services', 'id', id);
-    };
+        yield supa.delete('treatment_services', 'id', id);
+    });
     // ── ID generators (based on current state length for uniqueness)
     const nextHN = () => pad(patients.length + 1);
     const nextVID = () => { const ts = Date.now(); return `V${ts}${Math.floor(Math.random() * 100)}`; };
@@ -751,7 +777,7 @@ END $$;`),
                 React.createElement("span", null, n.icon),
                 n.label))))),
         React.createElement("div", { style: { padding: '20px 20px 40px', maxWidth: 1200, margin: '0 auto' } },
-            page === 'dashboard' && React.createElement(DashboardPage, { todayVisits: todayVisits, todayAppoints: todayAppoints, lowStock: lowStock, monthRevenue: monthRevenue, patients: patients, visits: visits, appointments: appointments, medicines: medicines, today: todayStr }),
+            page === 'dashboard' && React.createElement(DashboardPage, { todayVisits: todayVisits, todayAppoints: todayAppoints, lowStock: lowStock, monthRevenue: monthRevenue, patients: patients, visits: visits, appointments: appointments, medicines: medicines, receipts: receipts, today: todayStr }),
             page === 'register' && React.createElement(RegisterPage, { patients: patients, savePatient: savePatient, visits: visits, saveVisit: saveVisit, deleteVisit: deleteVisit, nextHN: nextHN, nextVID: nextVID, setPage: setPage, getVisitsForHN: getVisitsForHN, getPatient: getPatient, treatmentServices: treatmentServices }),
             page === 'examine' && React.createElement(ExaminePage, { patients: patients, visits: visits, saveVisit: saveVisit, nextVID: nextVID, getPatient: getPatient, getVisitsForHN: getVisitsForHN, setCertModal: setCertModal, setReceiptModal: setReceiptModal, setAppointModal: setAppointModal, medicines: medicines, patchMedicineStock: patchMedicineStock, treatmentServices: treatmentServices, receipts: receipts, saveReceipt: saveReceipt, nextRID: nextRID, today: todayStr }),
             page === 'cert' && React.createElement(CertPage, { patients: patients, visits: visits, getPatient: getPatient }),
@@ -764,7 +790,7 @@ END $$;`),
         appointModal && React.createElement(AppointQuickModal, { data: appointModal, onClose: () => setAppointModal(null), getPatient: getPatient, appointments: appointments, saveAppointment: saveAppointment, nextAID: nextAID })));
 }
 // ===================== DASHBOARD =====================
-function DashboardPage({ todayVisits, todayAppoints, lowStock, monthRevenue, patients, visits, appointments, medicines, today }) {
+function DashboardPage({ todayVisits, todayAppoints, lowStock, monthRevenue, patients, visits, appointments, medicines, receipts, today }) {
     const upcomingAppoints = appointments.filter(a => a.date >= today).sort((a, b) => a.date.localeCompare(b.date) || a.time.localeCompare(b.time)).slice(0, 5);
     const recentVisits = [...visits].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 5);
     const expireSoon = medicines.filter(m => {
@@ -838,11 +864,60 @@ function DashboardPage({ todayVisits, todayAppoints, lowStock, monthRevenue, pat
                             " ",
                             React.createElement("span", { style: { color: 'var(--gray)' } },
                                 "\u0E2B\u0E21\u0E14\u0E2D\u0E32\u0E22\u0E38 ",
-                                thaiDate(m.expire)))))))))));
+                                thaiDate(m.expire))))))),
+                (() => {
+                    const todayRecs = receipts.filter(r => r.date === today);
+                    const todayConsumed = {};
+                    todayRecs.forEach(r => r.items.forEach(it => {
+                        if (!it.type || it.type === 'drug') {
+                            const med = medicines.find(m => it.desc && it.desc.includes(m.name));
+                            if (med) {
+                                if (!todayConsumed[med.id])
+                                    todayConsumed[med.id] = { name: med.name, unit: med.unit, qty: 0, revenue: 0 };
+                                todayConsumed[med.id].qty += it.qty;
+                                todayConsumed[med.id].revenue += it.qty * it.price;
+                            }
+                        }
+                    }));
+                    const rows = Object.values(todayConsumed).sort((a, b) => b.qty - a.qty);
+                    return (React.createElement("div", { className: "card", style: { gridColumn: '1/-1' } },
+                        React.createElement("div", { style: { fontWeight: 700, fontSize: 14, color: 'var(--primary)', marginBottom: 10 } },
+                            "\uD83D\uDC8A \u0E2A\u0E23\u0E38\u0E1B\u0E01\u0E32\u0E23\u0E43\u0E0A\u0E49\u0E22\u0E32\u0E27\u0E31\u0E19\u0E19\u0E35\u0E49 \u2014 ",
+                            thaiDate(today)),
+                        rows.length === 0 ? (React.createElement("div", { className: "text-gray text-sm" }, "\u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E21\u0E35\u0E01\u0E32\u0E23\u0E08\u0E48\u0E32\u0E22\u0E22\u0E32\u0E27\u0E31\u0E19\u0E19\u0E35\u0E49")) : (React.createElement("table", { style: { width: '100%', borderCollapse: 'collapse', fontSize: 13 } },
+                            React.createElement("thead", null,
+                                React.createElement("tr", { style: { background: 'var(--primary)', color: '#fff' } },
+                                    React.createElement("th", { style: { padding: '7px 12px', textAlign: 'left' } }, "\u0E0A\u0E37\u0E48\u0E2D\u0E22\u0E32"),
+                                    React.createElement("th", { style: { padding: '7px 12px', textAlign: 'center' } }, "\u0E08\u0E33\u0E19\u0E27\u0E19\u0E17\u0E35\u0E48\u0E08\u0E48\u0E32\u0E22"),
+                                    React.createElement("th", { style: { padding: '7px 12px', textAlign: 'right' } }, "\u0E23\u0E32\u0E22\u0E23\u0E31\u0E1A (\u0E1A\u0E32\u0E17)"),
+                                    React.createElement("th", { style: { padding: '7px 12px', textAlign: 'center' } }, "\u0E2A\u0E15\u0E4A\u0E2D\u0E01\u0E04\u0E07\u0E40\u0E2B\u0E25\u0E37\u0E2D"))),
+                            React.createElement("tbody", null, rows.map((c, i) => {
+                                const med = medicines.find(m => m.name === c.name);
+                                return (React.createElement("tr", { key: i, style: { background: i % 2 === 0 ? '#fff' : 'var(--gray-pale)' } },
+                                    React.createElement("td", { style: { padding: '7px 12px', fontWeight: 600 } }, c.name),
+                                    React.createElement("td", { style: { padding: '7px 12px', textAlign: 'center' } },
+                                        c.qty,
+                                        " ",
+                                        c.unit),
+                                    React.createElement("td", { style: { padding: '7px 12px', textAlign: 'right', color: 'var(--accent)', fontWeight: 600 } }, c.revenue.toLocaleString()),
+                                    React.createElement("td", { style: { padding: '7px 12px', textAlign: 'center', color: med && med.stock <= med.minstock ? 'var(--danger)' : 'var(--accent)', fontWeight: 700 } },
+                                        (med === null || med === void 0 ? void 0 : med.stock) || 0,
+                                        " ",
+                                        (med === null || med === void 0 ? void 0 : med.unit) || '',
+                                        med && med.stock <= med.minstock && React.createElement("span", { style: { fontSize: 10, marginLeft: 3 } }, "\u26A0\uFE0F"))));
+                            })),
+                            React.createElement("tfoot", null,
+                                React.createElement("tr", { style: { background: 'var(--accent)', color: '#fff', fontWeight: 700 } },
+                                    React.createElement("td", { style: { padding: '7px 12px' } }, "\u0E23\u0E27\u0E21"),
+                                    React.createElement("td", { style: { padding: '7px 12px', textAlign: 'center' } }, rows.reduce((s, c) => s + c.qty, 0)),
+                                    React.createElement("td", { style: { padding: '7px 12px', textAlign: 'right' } }, rows.reduce((s, c) => s + c.revenue, 0).toLocaleString()),
+                                    React.createElement("td", null)))))));
+                })()))));
 }
 // ===================== QUEUE TICKET PRINT =====================
 function printQueueTicket(qNum, pat, cc) {
     const now = new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
+    // width=320px ≈ 80mm at 96 dpi — only affects screen preview, not print
     const win = window.open('', '_blank', 'width=320,height=600,menubar=no,toolbar=no,location=no,status=no');
     win.document.write(`<!DOCTYPE html><html><head>
   <meta charset="UTF-8"/>
@@ -850,28 +925,77 @@ function printQueueTicket(qNum, pat, cc) {
   <title>บัตรคิว ${qNum}</title>
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700;800&display=swap');
-    @page { size: 80mm auto; margin: 0mm; }
+
+    /* ─── PAPER: 80mm thermal receipt ───
+       @page size is respected by Chrome/Edge/Firefox on desktop.
+       On iOS Safari the printer dialog controls paper size — instruct
+       user to pick "Receipt" / 80mm roll in the print dialog. */
+    @page {
+      size: 80mm auto;
+      margin: 0mm;
+    }
+
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    html { width: 80mm; background: #fff; }
-    body { font-family: 'Sarabun', 'TH Sarabun New', sans-serif; background: #fff; width: 80mm; max-width: 80mm; margin: 0; padding: 2mm 0 0; overflow: hidden; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-    .ticket { width: 76mm; margin: 0 auto; padding: 7px 9px; text-align: center; }
-    .clinic-row { display: flex; align-items: center; justify-content: center; gap: 5px; border-bottom: 1px solid #ddd; padding-bottom: 6px; margin-bottom: 7px; }
+
+    html {
+      width: 80mm;
+      background: #fff;
+    }
+    body {
+      font-family: 'Sarabun', 'TH Sarabun New', sans-serif;
+      background: #fff;
+      width: 80mm;
+      max-width: 80mm;
+      margin: 0;
+      padding: 2mm 0 0;
+      overflow: hidden;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+
+    .ticket {
+      width: 76mm;
+      margin: 0 auto;
+      padding: 7px 9px;
+      text-align: center;
+    }
+    .clinic-row {
+      display: flex; align-items: center; justify-content: center; gap: 5px;
+      border-bottom: 1px solid #ddd; padding-bottom: 6px; margin-bottom: 7px;
+    }
     .clinic-name { font-size: 9px; font-weight: 700; color: #1a5276; line-height: 1.3; text-align: left; }
     .qlabel { font-size: 8.5px; color: #888; letter-spacing: 2px; margin-bottom: 2px; text-transform: uppercase; }
     .qnum   { font-size: 48px; font-weight: 800; color: #1a5276; line-height: 1; margin: 3px 0 5px; }
     .hn     { font-size: 10.5px; font-weight: 700; color: #555; margin-bottom: 2px; }
     .name   { font-size: 12px; font-weight: 700; color: #222; margin-bottom: 5px; }
-    .cc-box { background: #fff8e1; border: 1px solid #f39c12; border-radius: 4px; padding: 5px 7px; margin: 5px 0; text-align: left; }
+    .cc-box   { background: #fff8e1; border: 1px solid #f39c12; border-radius: 4px; padding: 5px 7px; margin: 5px 0; text-align: left; }
     .cc-label { font-size: 8px; color: #888; font-weight: 700; margin-bottom: 2px; letter-spacing: 0.5px; }
-    .cc-text { font-size: 10.5px; color: #333; font-weight: 600; line-height: 1.4; }
+    .cc-text  { font-size: 10.5px; color: #333; font-weight: 600; line-height: 1.4; }
     .foot { font-size: 8px; color: #aaa; margin-top: 7px; border-top: 1px dashed #ddd; padding-top: 5px; line-height: 1.6; }
+
+    /* Screen-only print button */
     .print-wrap { text-align: center; padding: 8px 0 4px; }
-    .print-btn { padding: 7px 22px; background: #1a5276; color: #fff; border: none; border-radius: 5px; cursor: pointer; font-size: 13px; font-family: 'Sarabun', sans-serif; font-weight: 700; }
+    .print-btn  { padding: 7px 22px; background: #1a5276; color: #fff; border: none; border-radius: 5px; cursor: pointer; font-size: 13px; font-family: 'Sarabun', sans-serif; font-weight: 700; }
+
+    /* ─── PRINT OVERRIDES ─── */
     @media print {
-      @page { size: 80mm auto; margin: 0mm; }
-      html, body { width: 80mm !important; max-width: 80mm !important; margin: 0 !important; padding: 0 !important; overflow: hidden !important; }
+      @page {            /* repeat inside @media print for max browser compat */
+        size: 80mm auto;
+        margin: 0mm;
+      }
+      html, body {
+        width: 80mm !important;
+        max-width: 80mm !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        overflow: hidden !important;
+      }
       .print-wrap { display: none !important; }
-      .ticket { width: 76mm !important; margin: 0 auto !important; padding: 4px 6px !important; }
+      .ticket {
+        width: 76mm !important;
+        margin: 0 auto !important;
+        padding: 4px 6px !important;
+      }
     }
   </style>
   </head><body>
@@ -897,7 +1021,6 @@ function printQueueTicket(qNum, pat, cc) {
     win.document.close();
     setTimeout(() => { win.focus(); win.print(); }, 700);
 }
-
 // ===================== BLANK MEDICAL RECORD PRINT =====================
 function printBlankMedRecord() {
     const now = new Date();
@@ -1101,20 +1224,20 @@ function RegisterPage({ patients, savePatient, visits, saveVisit, deleteVisit, n
         return (p.fname || '').toLowerCase().includes(q) || (p.lname || '').toLowerCase().includes(q) ||
             (p.hn || '').includes(q) || (p.idcard || '').includes(q) || (p.tel || '').includes(q);
     });
-    const saveNewPatient = async () => {
+    const saveNewPatient = () => __awaiter(this, void 0, void 0, function* () {
         if (!form.fname.trim() || !form.lname.trim()) {
             alert('กรุณากรอกชื่อและนามสกุล');
             return;
         }
         const hn = nextHN();
         const newP = Object.assign(Object.assign({}, form), { hn, created_at: new Date().toISOString() });
-        await savePatient(newP);
+        yield savePatient(newP);
         const hasIntake = Object.values(intake).some(v => v && String(v).trim());
         let visitId = null;
         if (hasIntake && saveVisit && nextVID) {
             const vid = nextVID();
             visitId = vid;
-            await saveVisit({
+            yield saveVisit({
                 id: vid, hn, date: today(),
                 cc: intake.cc || '', pi: '', pe: '', dx: '', tx: '',
                 drugs: [], services: [],
@@ -1129,10 +1252,10 @@ function RegisterPage({ patients, savePatient, visits, saveVisit, deleteVisit, n
         setForm({ prefix: 'นาย', fname: '', lname: '', gender: 'ชาย', dob: '', idcard: '', tel: '', lineId: '', address: '', bloodtype: '', allergy: '', chronic: '', currentmed: '', email: '', occupation: '', emcontact: '', emtel: '' });
         setIntake({ cc: '', temp: '', bp_sys: '', bp_dia: '', pr: '', rr: '', o2: '', weight: '', height: '', nurse: '' });
         setSubpage('registered');
-    };
+    });
     const age = (dob) => { if (!dob)
         return '-'; return Math.floor((new Date() - new Date(dob)) / (365.25 * 24 * 60 * 60 * 1000)) + ' ปี'; };
-    const bmi = intake.weight && intake.height ? (intake.weight / ((intake.height / 100) ** 2)).toFixed(1) : null;
+    const bmi = intake.weight && intake.height ? (intake.weight / (Math.pow((intake.height / 100), 2))).toFixed(1) : null;
     const bmiLabel = bmi ? (bmi < 18.5 ? 'น้ำหนักน้อย' : bmi < 23 ? 'ปกติ' : bmi < 25 ? 'ท้วม' : bmi < 30 ? 'อ้วน' : 'อ้วนมาก') : '';
     return (React.createElement("div", null,
         React.createElement("div", { style: { display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 } },
@@ -1326,7 +1449,7 @@ function PatientDetail({ pat, visits, onBack, patients, savePatient, treatmentSe
     const fi = (k, v) => setIntake(prev => (Object.assign(Object.assign({}, prev), { [k]: v })));
     const age = (dob) => { if (!dob)
         return '-'; const d = new Date() - new Date(dob); return Math.floor(d / (365.25 * 24 * 60 * 60 * 1000)) + ' ปี'; };
-    const save = async () => { await savePatient(form); setEditing(false); alert('บันทึกข้อมูลเรียบร้อย'); };
+    const save = () => __awaiter(this, void 0, void 0, function* () { yield savePatient(form); setEditing(false); alert('บันทึกข้อมูลเรียบร้อย'); });
     // ── Visit pagination & inline edit
     const VISITS_PER_PAGE = 3;
     const [visitPage, setVisitPage] = useState(1);
@@ -1338,20 +1461,20 @@ function PatientDetail({ pat, visits, onBack, patients, savePatient, treatmentSe
     const pagedVisits = sortedVisits.slice((visitPage - 1) * VISITS_PER_PAGE, visitPage * VISITS_PER_PAGE);
     const startEditVisit = (v) => { setEditingVisit(v.id); setEditVform(Object.assign({}, v)); };
     const cancelEditVisit = () => { setEditingVisit(null); setEditVform(null); };
-    const saveEditVisit = async () => {
+    const saveEditVisit = () => __awaiter(this, void 0, void 0, function* () {
         if (!saveVisit) {
             alert('ไม่สามารถบันทึกได้');
             return;
         }
-        await saveVisit(editVform);
+        yield saveVisit(editVform);
         alert('✅ บันทึกการแก้ไขเรียบร้อย');
         setEditingVisit(null);
         setEditVform(null);
-    };
+    });
     // Count how many queues this patient already has today, to assign next sequence number
     const todayStr = today();
     const todaysVisitsForPat = (allVisits || visits).filter(v => v.hn === pat.hn && v.date === todayStr);
-    const createNewQueue = async () => {
+    const createNewQueue = () => __awaiter(this, void 0, void 0, function* () {
         if (!saveVisit || !nextVID) {
             alert('ไม่สามารถสร้างคิวใหม่ได้ในขณะนี้');
             return;
@@ -1366,12 +1489,12 @@ function PatientDetail({ pat, visits, onBack, patients, savePatient, treatmentSe
             o2: intake.o2 || '', weight: intake.weight || '', height: intake.height || '',
             nurse: intake.nurse || '', note: 'บันทึกโดยพยาบาลตอนลงทะเบียน (Visit ใหม่)',
         };
-        await saveVisit(v);
+        yield saveVisit(v);
         const qNum = String(todaysVisitsForPat.length + 1).padStart(3, '0') + '-' + pat.hn.slice(-3);
         setNewQueueResult({ qNum, cc: intake.cc, visitId: vid });
         setIntake({ cc: '', temp: '', bp_sys: '', bp_dia: '', pr: '', rr: '', o2: '', weight: '', height: '', nurse: '' });
-    };
-    const bmi = intake.weight && intake.height ? (intake.weight / ((intake.height / 100) ** 2)).toFixed(1) : null;
+    });
+    const bmi = intake.weight && intake.height ? (intake.weight / (Math.pow((intake.height / 100), 2))).toFixed(1) : null;
     return (React.createElement("div", null,
         React.createElement("div", { style: { display: 'flex', gap: 10, alignItems: 'center', marginBottom: 14, flexWrap: 'wrap' } },
             React.createElement("button", { className: "btn btn-gray btn-sm", onClick: onBack }, "\u2190 \u0E01\u0E25\u0E31\u0E1A"),
@@ -1488,13 +1611,13 @@ function PatientDetail({ pat, visits, onBack, patients, savePatient, treatmentSe
                                 React.createElement("button", { className: "btn btn-accent btn-sm no-print", onClick: saveEditVisit }, "\uD83D\uDCBE \u0E1A\u0E31\u0E19\u0E17\u0E36\u0E01"))
                             : React.createElement("button", { className: "btn btn-outline btn-sm no-print", onClick: () => startEditVisit(v) }, "\u270F\uFE0F \u0E41\u0E01\u0E49\u0E44\u0E02")),
                         React.createElement("button", { className: "btn btn-print btn-sm no-print", onClick: () => doPrint(`visit-card-${v.id}`, 'บันทึกการตรวจ Visit ' + v.id) }, "\uD83D\uDDA8\uFE0F \u0E1E\u0E34\u0E21\u0E1E\u0E4C"),
-                        deleteVisit && editingVisit !== v.id && (React.createElement("button", { className: "btn btn-sm no-print", style: { background: '#e74c3c', color: '#fff', border: 'none', minWidth: 54 }, title: "\u0E25\u0E1A\u0E1B\u0E23\u0E30\u0E27\u0E31\u0E15\u0E34\u0E01\u0E32\u0E23\u0E15\u0E23\u0E27\u0E08\u0E19\u0E35\u0E49", onClick: async () => {
+                        deleteVisit && editingVisit !== v.id && (React.createElement("button", { className: "btn btn-sm no-print", style: { background: '#e74c3c', color: '#fff', border: 'none', minWidth: 54 }, title: "\u0E25\u0E1A\u0E1B\u0E23\u0E30\u0E27\u0E31\u0E15\u0E34\u0E01\u0E32\u0E23\u0E15\u0E23\u0E27\u0E08\u0E19\u0E35\u0E49", onClick: () => __awaiter(this, void 0, void 0, function* () {
                                 if (!window.confirm(`⚠️ ลบประวัติการตรวจนี้?\n\nVisit ID: ${v.id}\nวันที่: ${thaiDate(v.date)}${v.cc ? '  CC: ' + v.cc : ''}\n\nไม่สามารถกู้คืนได้`))
                                     return;
-                                await deleteVisit(v.id);
+                                yield deleteVisit(v.id);
                                 if (visitPage > 1 && pagedVisits.length === 1)
                                     setVisitPage(p => Math.max(1, p - 1));
-                            } }, "\uD83D\uDDD1\uFE0F \u0E25\u0E1A")))),
+                            }) }, "\uD83D\uDDD1\uFE0F \u0E25\u0E1A")))),
                 editingVisit === v.id && editVform
                     ? React.createElement(VisitRecord, { v: editVform, setV: setEditVform, pat: pat, readOnly: false, treatmentServices: treatmentServices })
                     : React.createElement(VisitRecord, { v: v, pat: pat, readOnly: true, treatmentServices: treatmentServices })))),
@@ -1541,7 +1664,7 @@ function ExaminePage({ patients, visits, saveVisit, nextVID, getPatient, getVisi
         setVform(Object.assign(Object.assign({}, v), { drugs: v.drugs || [], services: v.services || [] }));
         setSaved(false);
     };
-    const loadPatient = async (p) => {
+    const loadPatient = (p) => __awaiter(this, void 0, void 0, function* () {
         setSearchResults([]);
         setPat(p);
         // Only load a pending (unfinished) queue visit — never overwrite a completed visit
@@ -1564,10 +1687,10 @@ function ExaminePage({ patients, visits, saveVisit, nextVID, getPatient, getVisi
             setVform(newV);
             // Save to DB immediately — this ensures the visit exists in the database
             // before the doctor starts filling in data.
-            await saveVisit(newV);
+            yield saveVisit(newV);
         }
         setSaved(false);
-    };
+    });
     // ── Today's queue using the status field (set at Registration)
     // Falls back to dx/pe heuristic for legacy visits created before status field existed
     const todayQueue = visits
@@ -1580,12 +1703,12 @@ function ExaminePage({ patients, visits, saveVisit, nextVID, getPatient, getVisi
         .sort((a, b) => (b.id || '').localeCompare(a.id || ''))
         .map(v => ({ visit: v, pat: getPatient(v.hn) }))
         .filter(q => q.pat);
-    const save = async () => {
+    const save = () => __awaiter(this, void 0, void 0, function* () {
         const completed = Object.assign(Object.assign({}, vform), { status: 'ตรวจเสร็จ' });
         setVform(completed);
         setSaved(true);
         setLastVisit(completed);
-        const result = await saveVisit(completed);
+        const result = yield saveVisit(completed);
         if (result === null) {
             console.error('save: DB write failed');
             // rlsError is set by saveVisit if it detected a permissions issue
@@ -1593,10 +1716,10 @@ function ExaminePage({ patients, visits, saveVisit, nextVID, getPatient, getVisi
         else {
             alert('✅ บันทึกการตรวจเรียบร้อย\nย้ายผู้ป่วยไปที่ "ตรวจเสร็จแล้ว" แล้ว');
         }
-    };
+    });
     // Issues receipt + deducts stock + marks visit as ตรวจเสร็จ.
     // Payment method + "ชำระแล้ว" are finalized later at the Receipt page counter.
-    const issueReceiptOnly = async () => {
+    const issueReceiptOnly = () => __awaiter(this, void 0, void 0, function* () {
         const drugItems = (vform.drugs || []).map(d => ({
             desc: d.name, qty: d.qty, unit: d.unit, price: d.price, type: 'drug', medId: d.medId
         }));
@@ -1613,19 +1736,19 @@ function ExaminePage({ patients, visits, saveVisit, nextVID, getPatient, getVisi
             items: allItems.length > 0 ? allItems : [{ desc: 'ค่าตรวจรักษา', qty: 1, unit: 'ครั้ง', price: 300, type: 'service' }],
             discount: 0, paid: '', status: 'รอชำระ',
         };
-        await saveReceipt(r);
+        yield saveReceipt(r);
         // Deduct stock for dispensed drugs
         if (vform.drugs && vform.drugs.length > 0) {
             for (const med of medicines) {
                 const ordered = vform.drugs.filter(d => d.medId === med.id);
                 if (ordered.length === 0)
                     continue;
-                await patchMedicineStock(med.id, Math.max(0, med.stock - ordered.reduce((s, d) => s + Number(d.qty), 0)));
+                yield patchMedicineStock(med.id, Math.max(0, med.stock - ordered.reduce((s, d) => s + Number(d.qty), 0)));
             }
         }
         // Mark visit done and save full record
         const completed = Object.assign(Object.assign({}, vform), { status: 'ตรวจเสร็จ' });
-        const vResult = await saveVisit(completed);
+        const vResult = yield saveVisit(completed);
         if (vResult === null) {
             console.error('issueReceiptOnly: visit status save failed');
             // rlsError modal shown by saveVisit if it is a permissions issue
@@ -1634,7 +1757,7 @@ function ExaminePage({ patients, visits, saveVisit, nextVID, getPatient, getVisi
         setSaved(true);
         setLastVisit(completed);
         alert(`✅ ออกใบเสร็จ ${r.id} แล้ว — สถานะ "รอชำระ"\nยอดรวม: ${r.items.reduce((s, i) => s + i.qty * i.price, 0).toLocaleString()} บาท\n\nกรุณาแจ้งผู้ป่วยไปชำระเงินที่หน้า "ใบเสร็จรับเงิน"`);
-    };
+    });
     const age = (dob) => { if (!dob)
         return '-'; return Math.floor((new Date() - new Date(dob)) / (365.25 * 24 * 60 * 60 * 1000)) + ' ปี'; };
     return (React.createElement("div", null,
@@ -1991,6 +2114,7 @@ function DrugAutocomplete({ medicines, onAdd, allergyList }) {
 }
 // ===================== MED LABEL PRINT =====================
 function printMedLabel(drug, pat, visitDate) {
+    // width=320px ≈ 80mm at 96 dpi — only affects preview window, not print
     const win = window.open('', '_blank', 'width=320,height=360,menubar=no,toolbar=no,location=no,status=no');
     win.document.write(`<!DOCTYPE html><html><head>
   <meta charset="UTF-8"/>
@@ -1998,22 +2122,53 @@ function printMedLabel(drug, pat, visitDate) {
   <title>ฉลากยา</title>
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap');
-    @page { size: 80mm auto; margin: 0mm; }
+
+    /* ─── PAPER: 80mm thermal label ─── */
+    @page {
+      size: 80mm auto;
+      margin: 0mm;
+    }
+
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
     html { width: 80mm; }
-    body { font-family: 'Sarabun', 'TH Sarabun New', sans-serif; font-size: 11px; background: #fff; width: 80mm; max-width: 80mm; margin: 0; padding: 2mm 2mm 0; overflow: hidden; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-    .label  { border: 2px solid #1a5276; border-radius: 5px; padding: 7px 9px; width: 76mm; margin: 0 auto; }
-    .header { border-bottom: 1.5px solid #1a5276; padding-bottom: 4px; margin-bottom: 5px; text-align: center; }
-    .clinic { font-size: 10px; font-weight: 700; color: #1a5276; }
-    .addr   { font-size: 8px; color: #555; margin-top: 1px; }
-    .drug   { font-size: 12px; font-weight: 700; color: #1a5276; margin: 4px 0 2px; }
-    .freq   { font-size: 11px; color: #1a5276; font-weight: 600; background: #e8f5ff; border-radius: 4px; padding: 3px 6px; margin: 3px 0; }
-    .row    { display: flex; justify-content: space-between; font-size: 10px; margin: 2px 0; }
-    .footer { border-top: 1px dashed #aaa; margin-top: 5px; padding-top: 4px; font-size: 9px; color: #555; }
+    body {
+      font-family: 'Sarabun', 'TH Sarabun New', sans-serif;
+      font-size: 11px;
+      background: #fff;
+      width: 80mm;
+      max-width: 80mm;
+      margin: 0;
+      padding: 2mm 2mm 0;
+      overflow: hidden;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+
+    .label   { border: 2px solid #1a5276; border-radius: 5px; padding: 7px 9px; width: 76mm; margin: 0 auto; }
+    .header  { border-bottom: 1.5px solid #1a5276; padding-bottom: 4px; margin-bottom: 5px; text-align: center; }
+    .clinic  { font-size: 10px; font-weight: 700; color: #1a5276; }
+    .addr    { font-size: 8px; color: #555; margin-top: 1px; }
+    .drug    { font-size: 12px; font-weight: 700; color: #1a5276; margin: 4px 0 2px; }
+    .freq    { font-size: 11px; color: #1a5276; font-weight: 600; background: #e8f5ff; border-radius: 4px; padding: 3px 6px; margin: 3px 0; }
+    .row     { display: flex; justify-content: space-between; font-size: 10px; margin: 2px 0; }
+    .footer  { border-top: 1px dashed #aaa; margin-top: 5px; padding-top: 4px; font-size: 9px; color: #555; }
+
     .print-wrap { text-align: center; margin-top: 8px; }
+
+    /* ─── PRINT OVERRIDES ─── */
     @media print {
-      @page { size: 80mm auto; margin: 0mm; }
-      html, body { width: 80mm !important; max-width: 80mm !important; margin: 0 !important; padding: 1mm !important; overflow: hidden !important; }
+      @page {
+        size: 80mm auto;
+        margin: 0mm;
+      }
+      html, body {
+        width: 80mm !important;
+        max-width: 80mm !important;
+        margin: 0 !important;
+        padding: 1mm !important;
+        overflow: hidden !important;
+      }
       .print-wrap { display: none !important; }
       .label { width: 78mm !important; margin: 0 !important; }
     }
@@ -2043,7 +2198,6 @@ function printMedLabel(drug, pat, visitDate) {
     win.document.close();
     setTimeout(() => { win.focus(); win.print(); }, 600);
 }
-
 // ===================== TREATMENT ORDER BOX =====================
 function TreatmentOrderBox({ services, onServicesChange, treatmentServices, readOnly }) {
     const [search, setSearch] = useState('');
@@ -2760,14 +2914,14 @@ function ReceiptPaymentPanel({ r, pat, updateReceipt, deleteReceipt, onDeleted, 
     const isPending = r.status !== 'ชำระแล้ว';
     const total = items.reduce((s, it) => s + it.qty * it.price, 0) - Number(discount);
     const updItem = (i, k, v) => setItems(prev => prev.map((it, idx) => idx === i ? Object.assign(Object.assign({}, it), { [k]: k === 'qty' || k === 'price' ? Number(v) : v }) : it));
-    const confirmPayment = async () => {
+    const confirmPayment = () => __awaiter(this, void 0, void 0, function* () {
         if (!window.confirm(`ยืนยันรับชำระเงิน ${total.toLocaleString()} บาท\nวิธีชำระ: ${paid}\n\nกดยืนยันเพื่อปิดบิล`))
             return;
         const updated = Object.assign(Object.assign({}, r), { items, discount: Number(discount), paid, status: 'ชำระแล้ว' });
-        await updateReceipt(updated);
+        yield updateReceipt(updated);
         onUpdated(updated);
         alert('✅ รับชำระเงินเรียบร้อย — ปิดบิลแล้ว');
-    };
+    });
     const docId = `receipt-doc-${r.id}`;
     return (React.createElement("div", null,
         isPending && (React.createElement("div", { className: "card no-print", style: { marginBottom: 14, background: '#fff8e1', border: '2px solid #f39c12' } },
@@ -2994,21 +3148,21 @@ function ReceiptQuickModal({ data, onClose, getPatient, nextRID, receipts, saveR
     // NOTE: payment method & "paid" confirmation now happen ONLY on the Receipt page
     // at the front counter. This modal just issues the receipt record (pending payment)
     // and deducts drug stock since the medication has physically been dispensed.
-    const save = async () => {
+    const save = () => __awaiter(this, void 0, void 0, function* () {
         const r = { id: nextRID(), hn: pat.hn, visitId: (visit === null || visit === void 0 ? void 0 : visit.id) || '', patname: pat.prefix + pat.fname + ' ' + pat.lname, date: today(), items, discount: Number(discount), paid: '', status: 'รอชำระ' };
-        await saveReceipt(r);
+        yield saveReceipt(r);
         for (const it of items) {
             if (it.type === 'drug') {
                 const med = it.medId
                     ? medicines.find(m => m.id === it.medId)
                     : medicines.find(m => it.desc.includes(m.name));
                 if (med)
-                    await patchMedicineStock(med.id, Math.max(0, med.stock - it.qty));
+                    yield patchMedicineStock(med.id, Math.max(0, med.stock - it.qty));
             }
         }
         alert(`ออกใบเสร็จ ${r.id} เรียบร้อย — สถานะ "รอชำระ"\n\nผู้ป่วยกรุณาไปชำระเงินที่เคาน์เตอร์ใบเสร็จ`);
         onClose();
-    };
+    });
     const drugTotal = items.filter(i => i.type === 'drug').reduce((s, i) => s + i.qty * i.price, 0);
     const svcTotal = items.filter(i => i.type !== 'drug').reduce((s, i) => s + i.qty * i.price, 0);
     return (React.createElement(Modal, { title: "\uD83E\uDDFE \u0E2D\u0E2D\u0E01\u0E43\u0E1A\u0E40\u0E2A\u0E23\u0E47\u0E08 (\u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E0A\u0E33\u0E23\u0E30)", onClose: onClose, width: 720 },
@@ -3098,14 +3252,14 @@ function AppointPage({ appointments, saveAppointment, deleteAppointment, patient
     }).sort((a, b) => a.date.localeCompare(b.date) || a.time.localeCompare(b.time));
     const todayCount = appointments.filter(a => a.date === today).length;
     const upCount = appointments.filter(a => a.date > today).length;
-    const save = async (f) => {
+    const save = (f) => __awaiter(this, void 0, void 0, function* () {
         const appt = f.id ? f : Object.assign(Object.assign({}, f), { id: nextAID() });
-        await saveAppointment(appt);
+        yield saveAppointment(appt);
         setEdit(null);
         setNewForm(null);
-    };
-    const del = async (id) => { if (window.confirm('ยืนยันลบการนัดหมายนี้?'))
-        await deleteAppointment(id); };
+    });
+    const del = (id) => __awaiter(this, void 0, void 0, function* () { if (window.confirm('ยืนยันลบการนัดหมายนี้?'))
+        yield deleteAppointment(id); });
     // Print a single appointment slip
     const printAppointSlip = (a) => {
         const pat = getPatient(a.hn);
@@ -3170,6 +3324,7 @@ function AppointPage({ appointments, saveAppointment, deleteAppointment, patient
                     React.createElement("tr", { style: { background: 'var(--primary)', color: '#fff' } },
                         React.createElement("th", { style: { padding: '9px 14px', textAlign: 'left' } }, "\u0E40\u0E25\u0E02\u0E19\u0E31\u0E14"),
                         React.createElement("th", { style: { padding: '9px 14px', textAlign: 'left' } }, "HN / \u0E0A\u0E37\u0E48\u0E2D"),
+                        React.createElement("th", { style: { padding: '9px 14px', textAlign: 'left' } }, "\u0E15\u0E34\u0E14\u0E15\u0E48\u0E2D"),
                         React.createElement("th", { style: { padding: '9px 14px', textAlign: 'left' } }, "\u0E27\u0E31\u0E19\u0E17\u0E35\u0E48 / \u0E40\u0E27\u0E25\u0E32"),
                         React.createElement("th", { style: { padding: '9px 14px', textAlign: 'left' } }, "\u0E40\u0E2B\u0E15\u0E38\u0E1C\u0E25\u0E19\u0E31\u0E14"),
                         React.createElement("th", { style: { padding: '9px 14px', textAlign: 'left' } }, "\u0E2A\u0E16\u0E32\u0E19\u0E30"),
@@ -3177,26 +3332,37 @@ function AppointPage({ appointments, saveAppointment, deleteAppointment, patient
                         React.createElement("th", { style: { padding: '9px 14px' } }))),
                 React.createElement("tbody", null,
                     filtered.length === 0 && React.createElement("tr", null,
-                        React.createElement("td", { colSpan: 7, style: { padding: 20, textAlign: 'center', color: 'var(--gray)' } }, "\u0E44\u0E21\u0E48\u0E1E\u0E1A\u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25")),
-                    filtered.map((a, i) => (React.createElement("tr", { key: a.id, style: { background: a.date === today ? '#e8f5e9' : i % 2 === 0 ? '#fff' : 'var(--gray-pale)' } },
-                        React.createElement("td", { style: { padding: '8px 14px', fontWeight: 700, color: 'var(--primary)' } }, a.id),
-                        React.createElement("td", { style: { padding: '8px 14px' } },
-                            React.createElement("div", { style: { fontWeight: 600 } },
-                                "HN ",
-                                a.hn),
-                            React.createElement("div", { style: { fontSize: 12 } }, a.patname)),
-                        React.createElement("td", { style: { padding: '8px 14px' } },
-                            thaiDate(a.date),
-                            " ",
-                            React.createElement("b", null, a.time)),
-                        React.createElement("td", { style: { padding: '8px 14px', color: 'var(--gray-dark)' } }, a.reason),
-                        React.createElement("td", { style: { padding: '8px 14px' } },
-                            React.createElement("span", { className: `tag ${a.status === 'นัดแล้ว' ? 'tag-blue' : a.status === 'มาตามนัด' ? 'tag-green' : 'tag-orange'}` }, a.status)),
-                        React.createElement("td", { style: { padding: '8px 14px', fontSize: 12, color: 'var(--gray)' } }, a.note),
-                        React.createElement("td", { style: { padding: '8px 14px', display: 'flex', gap: 4, flexWrap: 'wrap' } },
-                            React.createElement("button", { className: "btn btn-print btn-sm", onClick: () => printAppointSlip(a) }, "\uD83D\uDDA8\uFE0F \u0E1E\u0E34\u0E21\u0E1E\u0E4C"),
-                            React.createElement("button", { className: "btn btn-outline btn-sm", onClick: () => setEdit(Object.assign({}, a)) }, "\u0E41\u0E01\u0E49\u0E44\u0E02"),
-                            React.createElement("button", { className: "btn btn-danger btn-sm", onClick: () => del(a.id) }, "\u0E25\u0E1A"))))))))));
+                        React.createElement("td", { colSpan: 8, style: { padding: 20, textAlign: 'center', color: 'var(--gray)' } }, "\u0E44\u0E21\u0E48\u0E1E\u0E1A\u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25")),
+                    filtered.map((a, i) => {
+                        const apat = getPatient(a.hn);
+                        return (React.createElement("tr", { key: a.id, style: { background: a.date === today ? '#e8f5e9' : i % 2 === 0 ? '#fff' : 'var(--gray-pale)' } },
+                            React.createElement("td", { style: { padding: '8px 14px', fontWeight: 700, color: 'var(--primary)' } }, a.id),
+                            React.createElement("td", { style: { padding: '8px 14px' } },
+                                React.createElement("div", { style: { fontWeight: 600 } },
+                                    "HN ",
+                                    a.hn),
+                                React.createElement("div", { style: { fontSize: 12 } }, a.patname)),
+                            React.createElement("td", { style: { padding: '8px 14px', fontSize: 12 } },
+                                (apat === null || apat === void 0 ? void 0 : apat.tel) && React.createElement("div", { style: { color: 'var(--primary-light)' } },
+                                    "\uD83D\uDCDE ",
+                                    apat.tel),
+                                (apat === null || apat === void 0 ? void 0 : apat.lineId) && React.createElement("div", { style: { color: '#00b900', marginTop: (apat === null || apat === void 0 ? void 0 : apat.tel) ? 2 : 0 } },
+                                    "LINE: ",
+                                    apat.lineId),
+                                !(apat === null || apat === void 0 ? void 0 : apat.tel) && !(apat === null || apat === void 0 ? void 0 : apat.lineId) && React.createElement("span", { style: { color: 'var(--gray)' } }, "-")),
+                            React.createElement("td", { style: { padding: '8px 14px' } },
+                                thaiDate(a.date),
+                                " ",
+                                React.createElement("b", null, a.time)),
+                            React.createElement("td", { style: { padding: '8px 14px', color: 'var(--gray-dark)' } }, a.reason),
+                            React.createElement("td", { style: { padding: '8px 14px' } },
+                                React.createElement("span", { className: `tag ${a.status === 'นัดแล้ว' ? 'tag-blue' : a.status === 'มาตามนัด' ? 'tag-green' : 'tag-orange'}` }, a.status)),
+                            React.createElement("td", { style: { padding: '8px 14px', fontSize: 12, color: 'var(--gray)' } }, a.note),
+                            React.createElement("td", { style: { padding: '8px 14px', display: 'flex', gap: 4, flexWrap: 'wrap' } },
+                                React.createElement("button", { className: "btn btn-print btn-sm", onClick: () => printAppointSlip(a) }, "\uD83D\uDDA8\uFE0F \u0E1E\u0E34\u0E21\u0E1E\u0E4C"),
+                                React.createElement("button", { className: "btn btn-outline btn-sm", onClick: () => setEdit(Object.assign({}, a)) }, "\u0E41\u0E01\u0E49\u0E44\u0E02"),
+                                React.createElement("button", { className: "btn btn-danger btn-sm", onClick: () => del(a.id) }, "\u0E25\u0E1A"))));
+                    }))))));
 }
 function AppointForm({ form, onSave, onCancel, patients }) {
     const [f, setF] = useState(Object.assign({}, form));
@@ -3236,7 +3402,7 @@ function AppointQuickModal({ data, onClose, getPatient, appointments, saveAppoin
     const [form, setForm] = useState({ hn: pat.hn, patname: pat.prefix + pat.fname + ' ' + pat.lname, date: '', time: '09:00', reason: '', status: 'นัดแล้ว', note: '' });
     const f = (k, v) => setForm(prev => (Object.assign(Object.assign({}, prev), { [k]: v })));
     const slipId = 'appoint-slip-' + pat.hn;
-    const save = async () => { await saveAppointment(Object.assign(Object.assign({}, form), { id: nextAID() })); alert('บันทึกการนัดหมายเรียบร้อย'); onClose(); };
+    const save = () => __awaiter(this, void 0, void 0, function* () { yield saveAppointment(Object.assign(Object.assign({}, form), { id: nextAID() })); alert('บันทึกการนัดหมายเรียบร้อย'); onClose(); });
     return (React.createElement(Modal, { title: "\uD83D\uDCC5 \u0E1A\u0E31\u0E19\u0E17\u0E36\u0E01\u0E01\u0E32\u0E23\u0E19\u0E31\u0E14\u0E2B\u0E21\u0E32\u0E22", onClose: onClose, width: 540 },
         React.createElement("div", { style: { background: 'var(--primary-pale)', borderRadius: 6, padding: '8px 12px', marginBottom: 12, fontSize: 13 } },
             React.createElement("b", null,
@@ -3484,19 +3650,19 @@ function PharmacyPage({ medicines, saveMedicine, deleteMedicine, receipts, treat
     const [svcEdit, setSvcEdit] = useState(null);
     const [svcAdding, setSvcAdding] = useState(false);
     const SVC_CATS = ['ค่าตรวจ', 'ค่าหัตถการ', 'ค่าตรวจพิเศษ', 'เอกสาร', 'อื่นๆ'];
-    const saveService = async (f) => {
+    const saveService = (f) => __awaiter(this, void 0, void 0, function* () {
         const svc = f.id ? f : Object.assign(Object.assign({}, f), { id: 'S' + pad((treatmentServices || []).length + 1, 3), active: true });
-        await saveTreatmentService(svc);
+        yield saveTreatmentService(svc);
         setSvcEdit(null);
         setSvcAdding(false);
-    };
-    const delService = async (id) => { if (window.confirm('ยืนยันลบรายการหัตถการ?'))
-        await deleteTreatmentService(id); };
-    const toggleActive = async (id) => {
+    });
+    const delService = (id) => __awaiter(this, void 0, void 0, function* () { if (window.confirm('ยืนยันลบรายการหัตถการ?'))
+        yield deleteTreatmentService(id); });
+    const toggleActive = (id) => __awaiter(this, void 0, void 0, function* () {
         const svc = (treatmentServices || []).find(s => s.id === id);
         if (svc)
-            await saveTreatmentService(Object.assign(Object.assign({}, svc), { active: !svc.active }));
-    };
+            yield saveTreatmentService(Object.assign(Object.assign({}, svc), { active: !svc.active }));
+    });
     const cats = ['ทั้งหมด', ...new Set(medicines.map(m => m.category))];
     const filtered = medicines.filter(m => {
         const q = search.toLowerCase();
@@ -3506,17 +3672,37 @@ function PharmacyPage({ medicines, saveMedicine, deleteMedicine, receipts, treat
     });
     const lowStock = medicines.filter(m => m.stock <= m.minstock);
     const expireSoon = medicines.filter(m => (new Date(m.expire) - new Date()) / (1000 * 60 * 60 * 24) < 90);
-    const saveMed = async (f) => {
+    const saveMed = (f) => __awaiter(this, void 0, void 0, function* () {
         const med = f.id ? f : Object.assign(Object.assign({}, f), { id: 'M' + pad(medicines.length + 1, 3) });
-        await saveMedicine(med);
+        yield saveMedicine(med);
         setEdit(null);
         setAdding(false);
+    });
+    const delMed = (id) => __awaiter(this, void 0, void 0, function* () { if (window.confirm('ยืนยันลบ?'))
+        yield deleteMedicine(id); });
+    // Consumption report — date range filter state
+    const [rptPeriod, setRptPeriod] = useState('today');
+    const [rptYear, setRptYear] = useState(String(new Date().getFullYear()));
+    const [rptMonth, setRptMonth] = useState(String(new Date().getMonth() + 1).padStart(2, '0'));
+    const [rptDay, setRptDay] = useState(today());
+    const [rptFrom, setRptFrom] = useState('');
+    const [rptTo, setRptTo] = useState('');
+    const getRptRange = () => {
+        const todayStr = today();
+        if (rptPeriod === 'today')
+            return [todayStr, todayStr];
+        if (rptPeriod === 'day')
+            return [rptDay, rptDay];
+        if (rptPeriod === 'month')
+            return [rptYear + '-' + rptMonth + '-01', rptYear + '-' + rptMonth + '-31'];
+        if (rptPeriod === 'year')
+            return [rptYear + '-01-01', rptYear + '-12-31'];
+        return [rptFrom || '2000-01-01', rptTo || '2099-12-31'];
     };
-    const delMed = async (id) => { if (window.confirm('ยืนยันลบ?'))
-        await deleteMedicine(id); };
-    // Consumption report
+    const [rFrom, rTo] = getRptRange();
+    const rptReceipts = receipts.filter(r => r.date >= rFrom && r.date <= rTo);
     const consumed = {};
-    receipts.forEach(r => r.items.forEach(it => {
+    rptReceipts.forEach(r => r.items.forEach(it => {
         const med = medicines.find(m => it.desc.includes(m.name));
         if (med) {
             if (!consumed[med.id])
@@ -3630,29 +3816,69 @@ function PharmacyPage({ medicines, saveMedicine, deleteMedicine, receipts, treat
                             React.createElement("td", { style: { padding: '8px 12px', display: 'flex', gap: 4 } },
                                 React.createElement("button", { className: "btn btn-outline btn-sm", onClick: () => setSvcEdit(Object.assign({}, s)) }, "\u270F\uFE0F \u0E41\u0E01\u0E49\u0E44\u0E02"),
                                 React.createElement("button", { className: "btn btn-danger btn-sm", onClick: () => delService(s.id) }, "\u0E25\u0E1A")))))))))),
-        tab === 'report' && (React.createElement("div", { className: "card" },
-            React.createElement("div", { style: { fontWeight: 700, fontSize: 14, color: 'var(--primary)', marginBottom: 12 } }, "\uD83D\uDCCA \u0E2A\u0E23\u0E38\u0E1B\u0E01\u0E32\u0E23\u0E43\u0E0A\u0E49\u0E22\u0E32 (\u0E17\u0E31\u0E49\u0E07\u0E2B\u0E21\u0E14)"),
-            React.createElement("table", { style: { width: '100%', borderCollapse: 'collapse', fontSize: 13 } },
-                React.createElement("thead", null,
-                    React.createElement("tr", { style: { background: 'var(--primary)', color: '#fff' } },
-                        React.createElement("th", { style: { padding: '9px 14px', textAlign: 'left' } }, "\u0E0A\u0E37\u0E48\u0E2D\u0E22\u0E32"),
-                        React.createElement("th", { style: { padding: '9px 14px', textAlign: 'center' } }, "\u0E08\u0E33\u0E19\u0E27\u0E19\u0E17\u0E35\u0E48\u0E08\u0E48\u0E32\u0E22"),
-                        React.createElement("th", { style: { padding: '9px 14px', textAlign: 'right' } }, "\u0E23\u0E32\u0E22\u0E23\u0E31\u0E1A (\u0E1A\u0E32\u0E17)"),
-                        React.createElement("th", { style: { padding: '9px 14px', textAlign: 'center' } }, "\u0E2A\u0E15\u0E4A\u0E2D\u0E01\u0E04\u0E07\u0E40\u0E2B\u0E25\u0E37\u0E2D"))),
-                React.createElement("tbody", null,
-                    Object.values(consumed).length === 0 && React.createElement("tr", null,
-                        React.createElement("td", { colSpan: 4, style: { padding: 20, textAlign: 'center', color: 'var(--gray)' } }, "\u0E44\u0E21\u0E48\u0E21\u0E35\u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25")),
-                    Object.values(consumed).sort((a, b) => b.revenue - a.revenue).map((c, i) => {
-                        const med = medicines.find(m => m.name === c.name);
-                        return (React.createElement("tr", { key: i, style: { background: i % 2 === 0 ? '#fff' : 'var(--gray-pale)' } },
-                            React.createElement("td", { style: { padding: '8px 14px', fontWeight: 600 } }, c.name),
-                            React.createElement("td", { style: { padding: '8px 14px', textAlign: 'center' } }, c.qty),
-                            React.createElement("td", { style: { padding: '8px 14px', textAlign: 'right', color: 'var(--accent)', fontWeight: 600 } }, c.revenue.toLocaleString()),
-                            React.createElement("td", { style: { padding: '8px 14px', textAlign: 'center' } },
-                                (med === null || med === void 0 ? void 0 : med.stock) || 0,
-                                " ",
-                                (med === null || med === void 0 ? void 0 : med.unit) || '')));
-                    })))))));
+        tab === 'report' && (React.createElement("div", null,
+            React.createElement("div", { className: "card", style: { marginBottom: 12 } },
+                React.createElement("div", { style: { fontWeight: 700, fontSize: 13, color: 'var(--primary)', marginBottom: 10 } }, "\uD83D\uDCCA \u0E2A\u0E23\u0E38\u0E1B\u0E01\u0E32\u0E23\u0E43\u0E0A\u0E49\u0E22\u0E32"),
+                React.createElement("div", { style: { display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' } }, [{ k: 'today', l: 'วันนี้' }, { k: 'day', l: 'เลือกวัน' }, { k: 'month', l: 'รายเดือน' }, { k: 'year', l: 'รายปี' }, { k: 'custom', l: 'กำหนดเอง' }].map(p => (React.createElement("button", { key: p.k, className: `btn btn-sm ${rptPeriod === p.k ? 'btn-primary' : 'btn-outline'}`, onClick: () => setRptPeriod(p.k) }, p.l)))),
+                React.createElement("div", { style: { display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end', marginTop: 10 } },
+                    rptPeriod === 'day' && (React.createElement("div", null,
+                        React.createElement("label", null, "\u0E27\u0E31\u0E19\u0E17\u0E35\u0E48"),
+                        React.createElement("input", { type: "date", value: rptDay, onChange: e => setRptDay(e.target.value), style: { width: 160 } }))),
+                    rptPeriod === 'month' && (React.createElement(React.Fragment, null,
+                        React.createElement("div", null,
+                            React.createElement("label", null, "\u0E1B\u0E35 (\u0E04.\u0E28.)"),
+                            React.createElement("select", { value: rptYear, onChange: e => setRptYear(e.target.value), style: { width: 100 } }, [0, 1, 2].map(i => { const y = String(new Date().getFullYear() - i); return React.createElement("option", { key: y, value: y }, y); }))),
+                        React.createElement("div", null,
+                            React.createElement("label", null, "\u0E40\u0E14\u0E37\u0E2D\u0E19"),
+                            React.createElement("select", { value: rptMonth, onChange: e => setRptMonth(e.target.value), style: { width: 130 } }, ['01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12'].map((m, i) => (React.createElement("option", { key: m, value: m }, ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'][i]))))))),
+                    rptPeriod === 'year' && (React.createElement("div", null,
+                        React.createElement("label", null, "\u0E1B\u0E35 (\u0E04.\u0E28.)"),
+                        React.createElement("select", { value: rptYear, onChange: e => setRptYear(e.target.value), style: { width: 100 } }, [0, 1, 2].map(i => { const y = String(new Date().getFullYear() - i); return React.createElement("option", { key: y, value: y }, y); })))),
+                    rptPeriod === 'custom' && (React.createElement(React.Fragment, null,
+                        React.createElement("div", null,
+                            React.createElement("label", null, "\u0E15\u0E31\u0E49\u0E07\u0E41\u0E15\u0E48\u0E27\u0E31\u0E19\u0E17\u0E35\u0E48"),
+                            React.createElement("input", { type: "date", value: rptFrom, onChange: e => setRptFrom(e.target.value), style: { width: 160 } })),
+                        React.createElement("div", null,
+                            React.createElement("label", null, "\u0E16\u0E36\u0E07\u0E27\u0E31\u0E19\u0E17\u0E35\u0E48"),
+                            React.createElement("input", { type: "date", value: rptTo, onChange: e => setRptTo(e.target.value), style: { width: 160 } }))))),
+                React.createElement("div", { style: { marginTop: 8, fontSize: 12, color: 'var(--gray)' } },
+                    "\u0E0A\u0E48\u0E27\u0E07\u0E40\u0E27\u0E25\u0E32: ",
+                    React.createElement("b", { style: { color: 'var(--primary)' } },
+                        thaiDate(rFrom),
+                        rFrom !== rTo ? ' — ' + thaiDate(rTo) : ''),
+                    ' ',
+                    React.createElement("span", { style: { color: 'var(--accent)' } },
+                        "(",
+                        rptReceipts.length,
+                        " \u0E43\u0E1A\u0E40\u0E2A\u0E23\u0E47\u0E08)"))),
+            React.createElement("div", { className: "card" },
+                React.createElement("table", { style: { width: '100%', borderCollapse: 'collapse', fontSize: 13 } },
+                    React.createElement("thead", null,
+                        React.createElement("tr", { style: { background: 'var(--primary)', color: '#fff' } },
+                            React.createElement("th", { style: { padding: '9px 14px', textAlign: 'left' } }, "\u0E0A\u0E37\u0E48\u0E2D\u0E22\u0E32"),
+                            React.createElement("th", { style: { padding: '9px 14px', textAlign: 'center' } }, "\u0E08\u0E33\u0E19\u0E27\u0E19\u0E17\u0E35\u0E48\u0E08\u0E48\u0E32\u0E22"),
+                            React.createElement("th", { style: { padding: '9px 14px', textAlign: 'right' } }, "\u0E23\u0E32\u0E22\u0E23\u0E31\u0E1A (\u0E1A\u0E32\u0E17)"),
+                            React.createElement("th", { style: { padding: '9px 14px', textAlign: 'center' } }, "\u0E2A\u0E15\u0E4A\u0E2D\u0E01\u0E04\u0E07\u0E40\u0E2B\u0E25\u0E37\u0E2D"))),
+                    React.createElement("tbody", null,
+                        Object.values(consumed).length === 0 && React.createElement("tr", null,
+                            React.createElement("td", { colSpan: 4, style: { padding: 20, textAlign: 'center', color: 'var(--gray)' } }, "\u0E44\u0E21\u0E48\u0E21\u0E35\u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25\u0E43\u0E19\u0E0A\u0E48\u0E27\u0E07\u0E40\u0E27\u0E25\u0E32\u0E19\u0E35\u0E49")),
+                        Object.values(consumed).sort((a, b) => b.revenue - a.revenue).map((c, i) => {
+                            const med = medicines.find(m => m.name === c.name);
+                            return (React.createElement("tr", { key: i, style: { background: i % 2 === 0 ? '#fff' : 'var(--gray-pale)' } },
+                                React.createElement("td", { style: { padding: '8px 14px', fontWeight: 600 } }, c.name),
+                                React.createElement("td", { style: { padding: '8px 14px', textAlign: 'center' } }, c.qty),
+                                React.createElement("td", { style: { padding: '8px 14px', textAlign: 'right', color: 'var(--accent)', fontWeight: 600 } }, c.revenue.toLocaleString()),
+                                React.createElement("td", { style: { padding: '8px 14px', textAlign: 'center' } },
+                                    (med === null || med === void 0 ? void 0 : med.stock) || 0,
+                                    " ",
+                                    (med === null || med === void 0 ? void 0 : med.unit) || '')));
+                        })),
+                    Object.values(consumed).length > 0 && (React.createElement("tfoot", null,
+                        React.createElement("tr", { style: { background: 'var(--accent)', color: '#fff', fontWeight: 700 } },
+                            React.createElement("td", { style: { padding: '8px 14px' } }, "\u0E23\u0E27\u0E21"),
+                            React.createElement("td", { style: { padding: '8px 14px', textAlign: 'center' } }, Object.values(consumed).reduce((s, c) => s + c.qty, 0)),
+                            React.createElement("td", { style: { padding: '8px 14px', textAlign: 'right' } }, Object.values(consumed).reduce((s, c) => s + c.revenue, 0).toLocaleString()),
+                            React.createElement("td", null))))))))));
 }
 function MedForm({ form, onSave, onCancel, isNew }) {
     const [f, setF] = useState(Object.assign({}, form));

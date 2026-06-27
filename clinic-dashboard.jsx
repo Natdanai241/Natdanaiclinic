@@ -763,7 +763,7 @@ END $$;`}</pre>
 
       {/* CONTENT */}
       <div style={{padding:'20px 20px 40px',maxWidth:1200,margin:'0 auto'}}>
-        {page==='dashboard' && <DashboardPage todayVisits={todayVisits} todayAppoints={todayAppoints} lowStock={lowStock} monthRevenue={monthRevenue} patients={patients} visits={visits} appointments={appointments} medicines={medicines} today={todayStr} />}
+        {page==='dashboard' && <DashboardPage todayVisits={todayVisits} todayAppoints={todayAppoints} lowStock={lowStock} monthRevenue={monthRevenue} patients={patients} visits={visits} appointments={appointments} medicines={medicines} receipts={receipts} today={todayStr} />}
         {page==='register' && <RegisterPage patients={patients} savePatient={savePatient} visits={visits} saveVisit={saveVisit} deleteVisit={deleteVisit} nextHN={nextHN} nextVID={nextVID} setPage={setPage} getVisitsForHN={getVisitsForHN} getPatient={getPatient} treatmentServices={treatmentServices} />}
         {page==='examine' && <ExaminePage patients={patients} visits={visits} saveVisit={saveVisit} nextVID={nextVID} getPatient={getPatient} getVisitsForHN={getVisitsForHN} setCertModal={setCertModal} setReceiptModal={setReceiptModal} setAppointModal={setAppointModal} medicines={medicines} patchMedicineStock={patchMedicineStock} treatmentServices={treatmentServices} receipts={receipts} saveReceipt={saveReceipt} nextRID={nextRID} today={todayStr} />}
         {page==='cert' && <CertPage patients={patients} visits={visits} getPatient={getPatient} />}
@@ -782,7 +782,7 @@ END $$;`}</pre>
 }
 
 // ===================== DASHBOARD =====================
-function DashboardPage({todayVisits,todayAppoints,lowStock,monthRevenue,patients,visits,appointments,medicines,today}) {
+function DashboardPage({todayVisits,todayAppoints,lowStock,monthRevenue,patients,visits,appointments,medicines,receipts,today}) {
   const upcomingAppoints = appointments.filter(a=>a.date>=today).sort((a,b)=>a.date.localeCompare(b.date)||a.time.localeCompare(b.time)).slice(0,5);
   const recentVisits = [...visits].sort((a,b)=>b.date.localeCompare(a.date)).slice(0,5);
   const expireSoon = medicines.filter(m=>{
@@ -855,6 +855,65 @@ function DashboardPage({todayVisits,todayAppoints,lowStock,monthRevenue,patients
             ))}
           </div>
         </div>
+        {/* ── Daily medication usage summary ── */}
+        {(()=>{
+          const todayRecs=receipts.filter(r=>r.date===today);
+          const todayConsumed={};
+          todayRecs.forEach(r=>r.items.forEach(it=>{
+            if(!it.type||it.type==='drug'){
+              const med=medicines.find(m=>it.desc&&it.desc.includes(m.name));
+              if(med){
+                if(!todayConsumed[med.id])todayConsumed[med.id]={name:med.name,unit:med.unit,qty:0,revenue:0};
+                todayConsumed[med.id].qty+=it.qty;
+                todayConsumed[med.id].revenue+=it.qty*it.price;
+              }
+            }
+          }));
+          const rows=Object.values(todayConsumed).sort((a,b)=>b.qty-a.qty);
+          return (
+            <div className="card" style={{gridColumn:'1/-1'}}>
+              <div style={{fontWeight:700,fontSize:14,color:'var(--primary)',marginBottom:10}}>💊 สรุปการใช้ยาวันนี้ — {thaiDate(today)}</div>
+              {rows.length===0?(
+                <div className="text-gray text-sm">ยังไม่มีการจ่ายยาวันนี้</div>
+              ):(
+                <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
+                  <thead>
+                    <tr style={{background:'var(--primary)',color:'#fff'}}>
+                      <th style={{padding:'7px 12px',textAlign:'left'}}>ชื่อยา</th>
+                      <th style={{padding:'7px 12px',textAlign:'center'}}>จำนวนที่จ่าย</th>
+                      <th style={{padding:'7px 12px',textAlign:'right'}}>รายรับ (บาท)</th>
+                      <th style={{padding:'7px 12px',textAlign:'center'}}>สต๊อกคงเหลือ</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((c,i)=>{
+                      const med=medicines.find(m=>m.name===c.name);
+                      return (
+                        <tr key={i} style={{background:i%2===0?'#fff':'var(--gray-pale)'}}>
+                          <td style={{padding:'7px 12px',fontWeight:600}}>{c.name}</td>
+                          <td style={{padding:'7px 12px',textAlign:'center'}}>{c.qty} {c.unit}</td>
+                          <td style={{padding:'7px 12px',textAlign:'right',color:'var(--accent)',fontWeight:600}}>{c.revenue.toLocaleString()}</td>
+                          <td style={{padding:'7px 12px',textAlign:'center',color:med&&med.stock<=med.minstock?'var(--danger)':'var(--accent)',fontWeight:700}}>
+                            {med?.stock||0} {med?.unit||''}
+                            {med&&med.stock<=med.minstock&&<span style={{fontSize:10,marginLeft:3}}>⚠️</span>}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                  <tfoot>
+                    <tr style={{background:'var(--accent)',color:'#fff',fontWeight:700}}>
+                      <td style={{padding:'7px 12px'}}>รวม</td>
+                      <td style={{padding:'7px 12px',textAlign:'center'}}>{rows.reduce((s,c)=>s+c.qty,0)}</td>
+                      <td style={{padding:'7px 12px',textAlign:'right'}}>{rows.reduce((s,c)=>s+c.revenue,0).toLocaleString()}</td>
+                      <td></td>
+                    </tr>
+                  </tfoot>
+                </table>
+              )}
+            </div>
+          );
+        })()}
       </div>
       </div>
     </div>
@@ -3727,6 +3786,7 @@ function AppointPage({appointments,saveAppointment,deleteAppointment,patients,ne
             <tr style={{background:'var(--primary)',color:'#fff'}}>
               <th style={{padding:'9px 14px',textAlign:'left'}}>เลขนัด</th>
               <th style={{padding:'9px 14px',textAlign:'left'}}>HN / ชื่อ</th>
+              <th style={{padding:'9px 14px',textAlign:'left'}}>ติดต่อ</th>
               <th style={{padding:'9px 14px',textAlign:'left'}}>วันที่ / เวลา</th>
               <th style={{padding:'9px 14px',textAlign:'left'}}>เหตุผลนัด</th>
               <th style={{padding:'9px 14px',textAlign:'left'}}>สถานะ</th>
@@ -3735,11 +3795,18 @@ function AppointPage({appointments,saveAppointment,deleteAppointment,patients,ne
             </tr>
           </thead>
           <tbody>
-            {filtered.length===0&&<tr><td colSpan={7} style={{padding:20,textAlign:'center',color:'var(--gray)'}}>ไม่พบข้อมูล</td></tr>}
-            {filtered.map((a,i)=>(
+            {filtered.length===0&&<tr><td colSpan={8} style={{padding:20,textAlign:'center',color:'var(--gray)'}}>ไม่พบข้อมูล</td></tr>}
+            {filtered.map((a,i)=>{
+              const apat=getPatient(a.hn);
+              return (
               <tr key={a.id} style={{background:a.date===today?'#e8f5e9':i%2===0?'#fff':'var(--gray-pale)'}}>
                 <td style={{padding:'8px 14px',fontWeight:700,color:'var(--primary)'}}>{a.id}</td>
                 <td style={{padding:'8px 14px'}}><div style={{fontWeight:600}}>HN {a.hn}</div><div style={{fontSize:12}}>{a.patname}</div></td>
+                <td style={{padding:'8px 14px',fontSize:12}}>
+                  {apat?.tel&&<div style={{color:'var(--primary-light)'}}>📞 {apat.tel}</div>}
+                  {apat?.lineId&&<div style={{color:'#00b900',marginTop:apat?.tel?2:0}}>LINE: {apat.lineId}</div>}
+                  {!apat?.tel&&!apat?.lineId&&<span style={{color:'var(--gray)'}}>-</span>}
+                </td>
                 <td style={{padding:'8px 14px'}}>{thaiDate(a.date)} <b>{a.time}</b></td>
                 <td style={{padding:'8px 14px',color:'var(--gray-dark)'}}>{a.reason}</td>
                 <td style={{padding:'8px 14px'}}>
@@ -3752,7 +3819,8 @@ function AppointPage({appointments,saveAppointment,deleteAppointment,patients,ne
                   <button className="btn btn-danger btn-sm" onClick={()=>del(a.id)}>ลบ</button>
                 </td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -4078,9 +4146,26 @@ function PharmacyPage({medicines,saveMedicine,deleteMedicine,receipts,treatmentS
   };
   const delMed=async(id)=>{if(window.confirm('ยืนยันลบ?'))await deleteMedicine(id);};
 
-  // Consumption report
+  // Consumption report — date range filter state
+  const [rptPeriod,setRptPeriod]=useState('today');
+  const [rptYear,setRptYear]=useState(String(new Date().getFullYear()));
+  const [rptMonth,setRptMonth]=useState(String(new Date().getMonth()+1).padStart(2,'0'));
+  const [rptDay,setRptDay]=useState(today());
+  const [rptFrom,setRptFrom]=useState('');
+  const [rptTo,setRptTo]=useState('');
+
+  const getRptRange=()=>{
+    const todayStr=today();
+    if(rptPeriod==='today') return [todayStr,todayStr];
+    if(rptPeriod==='day') return [rptDay,rptDay];
+    if(rptPeriod==='month') return [rptYear+'-'+rptMonth+'-01',rptYear+'-'+rptMonth+'-31'];
+    if(rptPeriod==='year') return [rptYear+'-01-01',rptYear+'-12-31'];
+    return [rptFrom||'2000-01-01',rptTo||'2099-12-31'];
+  };
+  const [rFrom,rTo]=getRptRange();
+  const rptReceipts=receipts.filter(r=>r.date>=rFrom&&r.date<=rTo);
   const consumed={};
-  receipts.forEach(r=>r.items.forEach(it=>{
+  rptReceipts.forEach(r=>r.items.forEach(it=>{
     const med=medicines.find(m=>it.desc.includes(m.name));
     if(med){if(!consumed[med.id])consumed[med.id]={name:med.name,qty:0,revenue:0};consumed[med.id].qty+=it.qty;consumed[med.id].revenue+=it.qty*it.price;}
   }));
@@ -4229,32 +4314,92 @@ function PharmacyPage({medicines,saveMedicine,deleteMedicine,receipts,treatmentS
         </div>
       )}
       {tab==='report'&&(
-        <div className="card">
-          <div style={{fontWeight:700,fontSize:14,color:'var(--primary)',marginBottom:12}}>📊 สรุปการใช้ยา (ทั้งหมด)</div>
-          <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
-            <thead>
-              <tr style={{background:'var(--primary)',color:'#fff'}}>
-                <th style={{padding:'9px 14px',textAlign:'left'}}>ชื่อยา</th>
-                <th style={{padding:'9px 14px',textAlign:'center'}}>จำนวนที่จ่าย</th>
-                <th style={{padding:'9px 14px',textAlign:'right'}}>รายรับ (บาท)</th>
-                <th style={{padding:'9px 14px',textAlign:'center'}}>สต๊อกคงเหลือ</th>
-              </tr>
-            </thead>
-            <tbody>
-              {Object.values(consumed).length===0&&<tr><td colSpan={4} style={{padding:20,textAlign:'center',color:'var(--gray)'}}>ไม่มีข้อมูล</td></tr>}
-              {Object.values(consumed).sort((a,b)=>b.revenue-a.revenue).map((c,i)=>{
-                const med=medicines.find(m=>m.name===c.name);
-                return (
-                  <tr key={i} style={{background:i%2===0?'#fff':'var(--gray-pale)'}}>
-                    <td style={{padding:'8px 14px',fontWeight:600}}>{c.name}</td>
-                    <td style={{padding:'8px 14px',textAlign:'center'}}>{c.qty}</td>
-                    <td style={{padding:'8px 14px',textAlign:'right',color:'var(--accent)',fontWeight:600}}>{c.revenue.toLocaleString()}</td>
-                    <td style={{padding:'8px 14px',textAlign:'center'}}>{med?.stock||0} {med?.unit||''}</td>
+        <div>
+          {/* Date range filter bar */}
+          <div className="card" style={{marginBottom:12}}>
+            <div style={{fontWeight:700,fontSize:13,color:'var(--primary)',marginBottom:10}}>📊 สรุปการใช้ยา</div>
+            <div style={{display:'flex',gap:8,flexWrap:'wrap',alignItems:'flex-end'}}>
+              {[{k:'today',l:'วันนี้'},{k:'day',l:'เลือกวัน'},{k:'month',l:'รายเดือน'},{k:'year',l:'รายปี'},{k:'custom',l:'กำหนดเอง'}].map(p=>(
+                <button key={p.k}
+                  className={`btn btn-sm ${rptPeriod===p.k?'btn-primary':'btn-outline'}`}
+                  onClick={()=>setRptPeriod(p.k)}>{p.l}</button>
+              ))}
+            </div>
+            <div style={{display:'flex',gap:10,flexWrap:'wrap',alignItems:'flex-end',marginTop:10}}>
+              {rptPeriod==='day'&&(
+                <div><label>วันที่</label><input type="date" value={rptDay} onChange={e=>setRptDay(e.target.value)} style={{width:160}} /></div>
+              )}
+              {rptPeriod==='month'&&(
+                <>
+                  <div><label>ปี (ค.ศ.)</label>
+                    <select value={rptYear} onChange={e=>setRptYear(e.target.value)} style={{width:100}}>
+                      {[0,1,2].map(i=>{const y=String(new Date().getFullYear()-i);return <option key={y} value={y}>{y}</option>;})}
+                    </select>
+                  </div>
+                  <div><label>เดือน</label>
+                    <select value={rptMonth} onChange={e=>setRptMonth(e.target.value)} style={{width:130}}>
+                      {['01','02','03','04','05','06','07','08','09','10','11','12'].map((m,i)=>(
+                        <option key={m} value={m}>{['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'][i]}</option>
+                      ))}
+                    </select>
+                  </div>
+                </>
+              )}
+              {rptPeriod==='year'&&(
+                <div><label>ปี (ค.ศ.)</label>
+                  <select value={rptYear} onChange={e=>setRptYear(e.target.value)} style={{width:100}}>
+                    {[0,1,2].map(i=>{const y=String(new Date().getFullYear()-i);return <option key={y} value={y}>{y}</option>;})}
+                  </select>
+                </div>
+              )}
+              {rptPeriod==='custom'&&(
+                <>
+                  <div><label>ตั้งแต่วันที่</label><input type="date" value={rptFrom} onChange={e=>setRptFrom(e.target.value)} style={{width:160}} /></div>
+                  <div><label>ถึงวันที่</label><input type="date" value={rptTo} onChange={e=>setRptTo(e.target.value)} style={{width:160}} /></div>
+                </>
+              )}
+            </div>
+            <div style={{marginTop:8,fontSize:12,color:'var(--gray)'}}>
+              ช่วงเวลา: <b style={{color:'var(--primary)'}}>{thaiDate(rFrom)}{rFrom!==rTo?' — '+thaiDate(rTo):''}</b>
+              {' '}<span style={{color:'var(--accent)'}}>({rptReceipts.length} ใบเสร็จ)</span>
+            </div>
+          </div>
+          <div className="card">
+            <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
+              <thead>
+                <tr style={{background:'var(--primary)',color:'#fff'}}>
+                  <th style={{padding:'9px 14px',textAlign:'left'}}>ชื่อยา</th>
+                  <th style={{padding:'9px 14px',textAlign:'center'}}>จำนวนที่จ่าย</th>
+                  <th style={{padding:'9px 14px',textAlign:'right'}}>รายรับ (บาท)</th>
+                  <th style={{padding:'9px 14px',textAlign:'center'}}>สต๊อกคงเหลือ</th>
+                </tr>
+              </thead>
+              <tbody>
+                {Object.values(consumed).length===0&&<tr><td colSpan={4} style={{padding:20,textAlign:'center',color:'var(--gray)'}}>ไม่มีข้อมูลในช่วงเวลานี้</td></tr>}
+                {Object.values(consumed).sort((a,b)=>b.revenue-a.revenue).map((c,i)=>{
+                  const med=medicines.find(m=>m.name===c.name);
+                  return (
+                    <tr key={i} style={{background:i%2===0?'#fff':'var(--gray-pale)'}}>
+                      <td style={{padding:'8px 14px',fontWeight:600}}>{c.name}</td>
+                      <td style={{padding:'8px 14px',textAlign:'center'}}>{c.qty}</td>
+                      <td style={{padding:'8px 14px',textAlign:'right',color:'var(--accent)',fontWeight:600}}>{c.revenue.toLocaleString()}</td>
+                      <td style={{padding:'8px 14px',textAlign:'center'}}>{med?.stock||0} {med?.unit||''}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+              {Object.values(consumed).length>0&&(
+                <tfoot>
+                  <tr style={{background:'var(--accent)',color:'#fff',fontWeight:700}}>
+                    <td style={{padding:'8px 14px'}}>รวม</td>
+                    <td style={{padding:'8px 14px',textAlign:'center'}}>{Object.values(consumed).reduce((s,c)=>s+c.qty,0)}</td>
+                    <td style={{padding:'8px 14px',textAlign:'right'}}>{Object.values(consumed).reduce((s,c)=>s+c.revenue,0).toLocaleString()}</td>
+                    <td></td>
                   </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                </tfoot>
+              )}
+            </table>
+          </div>
         </div>
       )}
     </div>
