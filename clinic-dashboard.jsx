@@ -18,8 +18,13 @@ const supa = {
   },
 
   // ── Learn a bad column and cache it
+  // FIX: Supabase returns JSON where Postgres wraps identifiers in " which becomes
+  // \" (escaped) in the JSON string. The regex must run on the *parsed* message,
+  // not the raw JSON text — otherwise it never matches and retries never fire.
   _learnBadCol(table, errText) {
-    const colMatch = errText.match(/column "([^"]+)" of relation/);
+    let msg = errText;
+    try { const e = JSON.parse(errText); if (e.message) msg = e.message; } catch(_) {}
+    const colMatch = msg.match(/column "([^"]+)" of relation/);
     if (!colMatch) return null;
     const badCol = colMatch[1];
     if (!this._missingCols[table]) this._missingCols[table] = [];

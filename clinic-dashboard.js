@@ -16,7 +16,10 @@ const supa = {
     },
     // ── Learn a bad column and cache it
     _learnBadCol(table, errText) {
-        const colMatch = errText.match(/column "([^"]+)" of relation/);
+        // FIX: Parse JSON first so the regex sees real " not JSON-escaped \"
+        let msg = errText;
+        try { const e = JSON.parse(errText); if (e.message) msg = e.message; } catch(_) {}
+        const colMatch = msg.match(/column "([^"]+)" of relation/);
         if (!colMatch)
             return null;
         const badCol = colMatch[1];
