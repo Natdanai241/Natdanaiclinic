@@ -62,6 +62,7 @@ const supa = {
             if (!r.ok) {
                 const errText = await r.text();
                 console.error(`insert ${table} [HTTP ${r.status}]:`, errText);
+                this._lastError = `HTTP ${r.status} on ${table}: ${errText}`;
                 if (this._isRlsError(r.status, errText)) {
                     console.error(`insert ${table}: RLS/permission error`);
                     return 'RLS_ERROR';
@@ -88,6 +89,7 @@ const supa = {
             if (!r.ok) {
                 const errText = await r.text();
                 console.error(`patch ${table} [HTTP ${r.status}]:`, errText);
+                this._lastError = `HTTP ${r.status} on ${table}: ${errText}`;
                 if (this._isRlsError(r.status, errText)) {
                     console.error(`patch ${table}: RLS/permission error`);
                     return 'RLS_ERROR';
@@ -675,11 +677,12 @@ function ClinicDashboard() {
                         onClick: () => setRlsError(false),
                         style: { flex: 1, background: '#eee', color: '#333', border: 'none', borderRadius: 7, padding: '10px 0', fontSize: 14, cursor: 'pointer' }
                     }, "\u0E1B\u0E34\u0E14 (\u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25\u0E16\u0E39\u0E01\u0E1A\u0E31\u0E19\u0E17\u0E36\u0E01\u0E43\u0E19\u0E2B\u0E19\u0E49\u0E32\u0E08\u0E2D\u0E41\u0E25\u0E49\u0E27)")))),
-        saveError && React.createElement("div", { style: { position: 'fixed', bottom: 0, left: 0, right: 0, background: '#c0392b', color: '#fff', padding: '14px 20px', zIndex: 9997, display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 14, boxShadow: '0 -4px 20px rgba(0,0,0,0.3)' } },
-            React.createElement("div", null,
-                React.createElement("b", null, "⚠️ ไม่สามารถบันทึกลงฐานข้อมูลได้"),
-                React.createElement("span", { style: { marginLeft: 12, opacity: 0.9 } }, "ข้อมูลอยู่ในหน้าจอ แต่จะหายเมื่อรีเฟรช — กรุณาตรวจสอบ Console (F12)")),
-            React.createElement("button", { onClick: () => setSaveError(false), style: { background: 'rgba(255,255,255,0.2)', border: 'none', color: '#fff', borderRadius: 6, padding: '6px 14px', cursor: 'pointer', fontSize: 13 } }, "ปิด")),
+        saveError && React.createElement("div", { style: { position: 'fixed', bottom: 0, left: 0, right: 0, background: '#c0392b', color: '#fff', padding: '14px 20px', zIndex: 9997, fontSize: 13, boxShadow: '0 -4px 20px rgba(0,0,0,0.3)' } },
+            React.createElement("div", { style: { display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 } },
+                React.createElement("div", null,
+                    React.createElement("b", null, "⚠️ DB Error: "),
+                    React.createElement("span", null, supa._lastError || 'unknown error')),
+                React.createElement("button", { onClick: () => setSaveError(false), style: { background: 'rgba(255,255,255,0.2)', border: 'none', color: '#fff', borderRadius: 6, padding: '4px 12px', cursor: 'pointer', fontSize: 13, flexShrink: 0 } }, "ปิด"))),
         React.createElement("div", { style: { background: `linear-gradient(135deg,#1a5276,#2e86c1)`, color: '#fff', padding: '0 0 0 0', boxShadow: '0 2px 12px rgba(26,82,118,0.25)' } },
             React.createElement("div", { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 24px 0' } },
                 React.createElement("div", { style: { display: 'flex', alignItems: 'center', gap: 14 } },
