@@ -18,8 +18,14 @@ const supa = {
   },
 
   // ── Learn a bad column and cache it
+  // Handles two error formats:
+  //   1. Postgres: column "col_name" of relation "table" does not exist
+  //   2. PostgREST PGRST204: Could not find the 'col_name' column of 'table' in the schema cache
   _learnBadCol(table, errText) {
-    const colMatch = errText.match(/column "([^"]+)" of relation/);
+    const colMatch =
+      errText.match(/column \"([^\"]+)\" of relation/) ||
+      errText.match(/Could not find the '([^']+)' column of/) ||
+      errText.match(/\bcould not find[^']*'([^']+)'\b/i);
     if (!colMatch) return null;
     const badCol = colMatch[1];
     if (!this._missingCols[table]) this._missingCols[table] = [];
@@ -71,10 +77,11 @@ const supa = {
         if (_depth < 10 && this._learnBadCol(table, errText)) {
           return this.insert(table, data, _depth + 1);
         }
-        return null;
+        // Return the error detail so callers can surface it to the user
+        return { _error: `HTTP ${r.status} on ${table}: ${errText}` };
       }
       return r.json();
-    } catch(e) { console.error(`insert ${table} network error:`, e); return null; }
+    } catch(e) { console.error(`insert ${table} network error:`, e); return { _error: String(e) }; }
   },
 
   // ── PATCH (update) by primary key, retry on column mismatch
@@ -97,10 +104,11 @@ const supa = {
         if (_depth < 10 && this._learnBadCol(table, errText)) {
           return this.patch(table, pkCol, pkVal, data, _depth + 1);
         }
-        return null;
+        // Return the error detail so callers can surface it to the user
+        return { _error: `HTTP ${r.status} on ${table}: ${errText}` };
       }
       return r.json();
-    } catch(e) { console.error(`patch ${table} network error:`, e); return null; }
+    } catch(e) { console.error(`patch ${table} network error:`, e); return { _error: String(e) }; }
   },
 
   // ── Upsert: try INSERT first; if 409 conflict → PATCH instead
@@ -193,19 +201,25 @@ const fromDbVisit = (r) => r ? ({
   queueNo: r.queue_no || '',
 }) : null;
 
-const toDbVisit = (v) => ({
-  id:v.id, hn:v.hn, date:v.date, cc:v.cc||'', pi:v.pi||'', pe:v.pe||'',
-  dx:v.dx||'', tx:v.tx||'', note:v.note||'', nurse:v.nurse||'',
-  bp:v.bp||'', pr:v.pr||'', rr:v.rr||'', temp:v.temp||'', o2:v.o2||'',
-  weight:v.weight||'', height:v.height||'',
-  // Send as native arrays — Supabase PostgREST handles jsonb columns natively.
-  // fromDbVisit already handles both array and string for backward compatibility.
-  drugs: Array.isArray(v.drugs) ? v.drugs : [],
-  services: Array.isArray(v.services) ? v.services : [],
-  // These columns may not exist in older DB schemas — supa.upsert will auto-strip them on error
-  status: v.status || 'รอตรวจ',
-  queue_no: v.queueNo || '',
-});
+const toDbVisit = (v) => {
+  // Build core row — always safe to send
+  const row = {
+    id:v.id, hn:v.hn, date:v.date, cc:v.cc||'', pi:v.pi||'', pe:v.pe||'',
+    dx:v.dx||'', tx:v.tx||'', note:v.note||'', nurse:v.nurse||'',
+    bp:v.bp||'', pr:v.pr||'', rr:v.rr||'', temp:v.temp||'', o2:v.o2||'',
+    weight:v.weight||'', height:v.height||'',
+    // Send as native arrays — Supabase PostgREST handles jsonb columns natively.
+    // fromDbVisit already handles both array and string for backward compatibility.
+    drugs: Array.isArray(v.drugs) ? v.drugs : [],
+    services: Array.isArray(v.services) ? v.services : [],
+    // These columns may not exist in older DB schemas — supa._learnBadCol will auto-strip them on error
+    status: v.status || 'รอตรวจ',
+  };
+  // queue_no is optional — only include if the column exists in DB (auto-stripped on first PGRST204 error)
+  // This prevents the insert failure when queue_no column is missing from the visits table.
+  if (v.queueNo) row.queue_no = v.queueNo;
+  return row;
+};
 
 const fromDbReceipt = (r) => r ? ({
   id:r.id, hn:r.hn, visitId:r.visit_id, patname:r.patname, date:r.date,
@@ -534,21 +548,22 @@ function ClinicDashboard() {
     let result;
     if (existedInDb) {
       result = await supa.patch('visits', 'id', v.id, dbRow);
-      if (result === null) {
+      if (result === null || (result && result._error)) {
         console.warn('saveVisit: PATCH failed, trying INSERT');
         result = await supa.insert('visits', dbRow);
       }
     } else {
       result = await supa.insert('visits', dbRow);
-      if (result === null) {
+      if (result === null || (result && result._error)) {
         console.warn('saveVisit: INSERT failed, trying PATCH');
         result = await supa.patch('visits', 'id', v.id, dbRow);
       }
     }
     if (result === 'RLS_ERROR') { setRlsError(true); return null; }
-    if (result === null) {
-      console.error('saveVisit: all DB write attempts failed for visit', v.id);
-      setSaveError(true);
+    if (result === null || (result && result._error)) {
+      const errMsg = (result && result._error) ? result._error : 'ไม่ทราบสาเหตุ — ดู Console';
+      console.error('saveVisit: all DB write attempts failed for visit', v.id, errMsg);
+      setSaveError(errMsg);
     }
     return result;
   };
@@ -717,11 +732,13 @@ END $$;`}</pre>
       {/* ── Save Error Banner */}
       {saveError&&(
         <div style={{position:'fixed',bottom:0,left:0,right:0,background:'#c0392b',color:'#fff',padding:'14px 20px',zIndex:9997,display:'flex',alignItems:'center',justifyContent:'space-between',fontSize:14,boxShadow:'0 -4px 20px rgba(0,0,0,0.3)'}}>
-          <div>
-            <b>⚠️ ไม่สามารถบันทึกลงฐานข้อมูลได้</b>
-            <span style={{marginLeft:12,opacity:0.9}}>ข้อมูลอยู่ในหน้าจอ แต่จะหายเมื่อรีเฟรช — กรุณาตรวจสอบ Console (F12)</span>
+          <div style={{flex:1,minWidth:0}}>
+            <b>⚠️ ไม่สามารถบันทึกลงฐานข้อมูลได้ — ข้อมูลจะหายเมื่อรีเฟรช</b>
+            {typeof saveError === 'string' && saveError !== 'true' && (
+              <div style={{fontSize:11,marginTop:4,opacity:0.9,fontFamily:'monospace',wordBreak:'break-all'}}>สาเหตุ: {saveError}</div>
+            )}
           </div>
-          <button onClick={()=>setSaveError(false)} style={{background:'rgba(255,255,255,0.2)',border:'none',color:'#fff',borderRadius:6,padding:'6px 14px',cursor:'pointer',fontSize:13}}>ปิด</button>
+          <button onClick={()=>setSaveError(false)} style={{background:'rgba(255,255,255,0.2)',border:'none',color:'#fff',borderRadius:6,padding:'6px 14px',cursor:'pointer',fontSize:13,marginLeft:12,flexShrink:0}}>ปิด</button>
         </div>
       )}
       {/* HEADER */}

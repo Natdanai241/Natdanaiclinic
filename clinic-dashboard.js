@@ -7,48 +7,63 @@ const supa = {
     headers: { "apikey": SUPA_KEY, "Authorization": `Bearer ${SUPA_KEY}`, "Content-Type": "application/json", "Prefer": "return=representation" },
     // Cache of columns confirmed missing per table — avoids repeated 400 errors
     _missingCols: {},
-
     // ── Strip known-bad columns from a row object
     _strip(table, row) {
         const known = this._missingCols[table] || [];
-        const out = { ...row };
+        const out = Object.assign({}, row);
         known.forEach(col => delete out[col]);
         return out;
     },
-
     // ── Learn a bad column and cache it
+    // Handles two error formats:
+    //   1. Postgres: column "col_name" of relation "table" does not exist
+    //   2. PostgREST PGRST204: Could not find the 'col_name' column of 'table' in the schema cache
     _learnBadCol(table, errText) {
-        const colMatch = errText.match(/column "([^"]+)" of relation/);
-        if (!colMatch) return null;
+        const colMatch = errText.match(/column \"([^\"]+)\" of relation/) ||
+            errText.match(/Could not find the '([^']+)' column of/) ||
+            errText.match(/\bcould not find[^']*'([^']+)'\b/i);
+        if (!colMatch)
+            return null;
         const badCol = colMatch[1];
-        if (!this._missingCols[table]) this._missingCols[table] = [];
+        if (!this._missingCols[table])
+            this._missingCols[table] = [];
         if (!this._missingCols[table].includes(badCol)) {
             this._missingCols[table].push(badCol);
             console.warn(`Auto-skipping missing column "${badCol}" in "${table}"`);
         }
         return badCol;
     },
-    // ── Detect RLS / permission errors
+    // ── Detect RLS / permission errors (42501, 403, permission denied)
     _isRlsError(status, errText) {
-        if (status === 403) return true;
+        if (status === 403)
+            return true;
         try {
             const e = JSON.parse(errText);
-            if (e.code === '42501') return true;
-            if ((e.message || '').toLowerCase().includes('permission denied')) return true;
-            if ((e.message || '').toLowerCase().includes('row-level security')) return true;
-        } catch (_) {}
+            if (e.code === '42501')
+                return true;
+            if ((e.message || '').toLowerCase().includes('permission denied'))
+                return true;
+            if ((e.message || '').toLowerCase().includes('row-level security'))
+                return true;
+        }
+        catch (_) { }
         return false;
     },
-
     // ── Generic fetch all rows from a table
     async getAll(table) {
         try {
             const r = await fetch(`${SUPA_URL}/rest/v1/${table}?order=created_at.asc`, { headers: this.headers });
-            if (!r.ok) { console.error(`getAll ${table}:`, await r.text()); return null; }
+            if (!r.ok) {
+                console.error(`getAll ${table}:`, await r.text());
+                return null;
+            }
             return r.json();
-        } catch (e) { console.error(`getAll ${table} network error:`, e); return null; }
+        }
+        catch (e) {
+            console.error(`getAll ${table} network error:`, e);
+            return null;
+        }
     },
-
     // ── INSERT a single row (POST), retry on column mismatch up to 10 times
     async insert(table, data, _depth) {
         _depth = _depth || 0;
@@ -56,26 +71,29 @@ const supa = {
         try {
             const r = await fetch(`${SUPA_URL}/rest/v1/${table}`, {
                 method: "POST",
-                headers: { ...this.headers, "Prefer": "return=representation" },
+                headers: Object.assign(Object.assign({}, this.headers), { "Prefer": "return=representation" }),
                 body: JSON.stringify(body),
             });
             if (!r.ok) {
                 const errText = await r.text();
                 console.error(`insert ${table} [HTTP ${r.status}]:`, errText);
-                this._lastError = `HTTP ${r.status} on ${table}: ${errText}`;
                 if (this._isRlsError(r.status, errText)) {
-                    console.error(`insert ${table}: RLS/permission error`);
+                    console.error(`insert ${table}: RLS/permission error — add INSERT policy for anon role`);
                     return 'RLS_ERROR';
                 }
                 if (_depth < 10 && this._learnBadCol(table, errText)) {
                     return this.insert(table, data, _depth + 1);
                 }
-                return null;
+                // Return the error detail so callers can surface it to the user
+                return { _error: `HTTP ${r.status} on ${table}: ${errText}` };
             }
             return r.json();
-        } catch (e) { console.error(`insert ${table} network error:`, e); return null; }
+        }
+        catch (e) {
+            console.error(`insert ${table} network error:`, e);
+            return { _error: String(e) };
+        }
     },
-
     // ── PATCH (update) by primary key, retry on column mismatch
     async patch(table, pkCol, pkVal, data, _depth) {
         _depth = _depth || 0;
@@ -83,37 +101,40 @@ const supa = {
         try {
             const r = await fetch(`${SUPA_URL}/rest/v1/${table}?${pkCol}=eq.${pkVal}`, {
                 method: "PATCH",
-                headers: { ...this.headers, "Prefer": "return=representation" },
+                headers: Object.assign(Object.assign({}, this.headers), { "Prefer": "return=representation" }),
                 body: JSON.stringify(body),
             });
             if (!r.ok) {
                 const errText = await r.text();
                 console.error(`patch ${table} [HTTP ${r.status}]:`, errText);
-                this._lastError = `HTTP ${r.status} on ${table}: ${errText}`;
                 if (this._isRlsError(r.status, errText)) {
-                    console.error(`patch ${table}: RLS/permission error`);
+                    console.error(`patch ${table}: RLS/permission error — add UPDATE policy for anon role`);
                     return 'RLS_ERROR';
                 }
                 if (_depth < 10 && this._learnBadCol(table, errText)) {
                     return this.patch(table, pkCol, pkVal, data, _depth + 1);
                 }
-                return null;
+                // Return the error detail so callers can surface it to the user
+                return { _error: `HTTP ${r.status} on ${table}: ${errText}` };
             }
             return r.json();
-        } catch (e) { console.error(`patch ${table} network error:`, e); return null; }
+        }
+        catch (e) {
+            console.error(`patch ${table} network error:`, e);
+            return { _error: String(e) };
+        }
     },
-
-    // ── Upsert: INSERT first; on conflict (409/23505) → PATCH
-    // Bulk arrays use merge-duplicates as before (seed data path)
+    // ── Upsert: try INSERT first; if 409 conflict → PATCH instead
+    // Also handles bulk arrays (for seed data) via old merge-duplicates method
     async upsert(table, data, _depth) {
         _depth = _depth || 0;
-        // Bulk array path — use merge-duplicates
+        // Bulk array path — use merge-duplicates as before
         if (Array.isArray(data)) {
             const body = data.map(row => this._strip(table, row));
             try {
                 const r = await fetch(`${SUPA_URL}/rest/v1/${table}`, {
                     method: "POST",
-                    headers: { ...this.headers, "Prefer": "resolution=merge-duplicates,return=representation" },
+                    headers: Object.assign(Object.assign({}, this.headers), { "Prefer": "resolution=merge-duplicates,return=representation" }),
                     body: JSON.stringify(body),
                 });
                 if (!r.ok) {
@@ -125,53 +146,72 @@ const supa = {
                     return null;
                 }
                 return r.json();
-            } catch (e) { console.error(`upsert[] ${table} network:`, e); return null; }
+            }
+            catch (e) {
+                console.error(`upsert[] ${table} network:`, e);
+                return null;
+            }
         }
-        // Single-row: INSERT → on conflict → PATCH
+        // Single-row path: INSERT → on conflict (409 / 23505) → PATCH
         const body = this._strip(table, data);
         try {
             const r = await fetch(`${SUPA_URL}/rest/v1/${table}`, {
                 method: "POST",
-                headers: { ...this.headers, "Prefer": "return=representation" },
+                headers: Object.assign(Object.assign({}, this.headers), { "Prefer": "return=representation" }),
                 body: JSON.stringify(body),
             });
-            if (r.ok) return r.json();
+            if (r.ok)
+                return r.json();
             const errText = await r.text();
             console.error(`upsert ${table} [HTTP ${r.status}]:`, errText);
             // RLS / permission error
             if (this._isRlsError(r.status, errText)) {
-                console.error(`upsert ${table}: RLS/permission error`);
+                console.error(`upsert ${table}: RLS/permission error — add policy for anon role`);
                 return 'RLS_ERROR';
             }
-            // Unknown column — strip and retry
+            // Unknown column → strip and retry insert
             if (_depth < 10 && this._learnBadCol(table, errText)) {
                 return this.upsert(table, data, _depth + 1);
             }
-            // Duplicate key → PATCH
+            // Duplicate key (23505) or HTTP 409 → fall back to PATCH
             let errObj = null;
-            try { errObj = JSON.parse(errText); } catch (_) {}
-            const pgCode = errObj?.code || '';
+            try {
+                errObj = JSON.parse(errText);
+            }
+            catch (_) { }
+            const pgCode = (errObj === null || errObj === void 0 ? void 0 : errObj.code) || '';
             if (r.status === 409 || pgCode === '23505') {
                 console.warn(`upsert ${table}: conflict on insert, falling back to PATCH`);
-                const pkVal = data['id'];
+                const pkCol = 'id';
+                const pkVal = data[pkCol];
                 if (pkVal !== undefined) {
-                    return this.patch(table, 'id', pkVal, data);
+                    return this.patch(table, pkCol, pkVal, data);
                 }
             }
-            console.error(`upsert ${table} pg_error: code=${pgCode} msg=${errObj?.message || errText}`);
+            console.error(`upsert ${table} pg_error: code=${pgCode} msg=${(errObj === null || errObj === void 0 ? void 0 : errObj.message) || errText}`);
             return null;
-        } catch (e) { console.error(`upsert ${table} network:`, e); return null; }
+        }
+        catch (e) {
+            console.error(`upsert ${table} network:`, e);
+            return null;
+        }
     },
-
     // ── Delete by primary key
     async delete(table, pkCol, pkVal) {
         try {
             const r = await fetch(`${SUPA_URL}/rest/v1/${table}?${pkCol}=eq.${pkVal}`, {
                 method: "DELETE", headers: this.headers,
             });
-            if (!r.ok) { console.error(`delete ${table}:`, await r.text()); return false; }
+            if (!r.ok) {
+                console.error(`delete ${table}:`, await r.text());
+                return false;
+            }
             return true;
-        } catch (e) { console.error(`delete ${table} network:`, e); return false; }
+        }
+        catch (e) {
+            console.error(`delete ${table} network:`, e);
+            return false;
+        }
     },
 };
 // DB row → app shape converters (snake_case ↔ camelCase for visits/receipts)
@@ -186,18 +226,26 @@ const fromDbVisit = (r) => r ? ({
     status: r.status || (r.dx || r.pe ? 'ตรวจเสร็จ' : 'รอตรวจ'),
     queueNo: r.queue_no || '',
 }) : null;
-const toDbVisit = (v) => ({
-    id: v.id, hn: v.hn, date: v.date, cc: v.cc || '', pi: v.pi || '', pe: v.pe || '',
-    dx: v.dx || '', tx: v.tx || '', note: v.note || '', nurse: v.nurse || '',
-    bp: v.bp || '', pr: v.pr || '', rr: v.rr || '', temp: v.temp || '', o2: v.o2 || '',
-    weight: v.weight || '', height: v.height || '',
-    // Send as native arrays — Supabase jsonb columns require this, not JSON strings
-    drugs: Array.isArray(v.drugs) ? v.drugs : [],
-    services: Array.isArray(v.services) ? v.services : [],
-    // These columns may not exist in older DB schemas — supa.upsert will auto-strip them on error
-    status: v.status || 'รอตรวจ',
-    queue_no: v.queueNo || '',
-});
+const toDbVisit = (v) => {
+    // Build core row — always safe to send
+    const row = {
+        id: v.id, hn: v.hn, date: v.date, cc: v.cc || '', pi: v.pi || '', pe: v.pe || '',
+        dx: v.dx || '', tx: v.tx || '', note: v.note || '', nurse: v.nurse || '',
+        bp: v.bp || '', pr: v.pr || '', rr: v.rr || '', temp: v.temp || '', o2: v.o2 || '',
+        weight: v.weight || '', height: v.height || '',
+        // Send as native arrays — Supabase PostgREST handles jsonb columns natively.
+        // fromDbVisit already handles both array and string for backward compatibility.
+        drugs: Array.isArray(v.drugs) ? v.drugs : [],
+        services: Array.isArray(v.services) ? v.services : [],
+        // These columns may not exist in older DB schemas — supa._learnBadCol will auto-strip them on error
+        status: v.status || 'รอตรวจ',
+    };
+    // queue_no is optional — only include if the column exists in DB (auto-stripped on first PGRST204 error)
+    // This prevents the insert failure when queue_no column is missing from the visits table.
+    if (v.queueNo)
+        row.queue_no = v.queueNo;
+    return row;
+};
 const fromDbReceipt = (r) => r ? ({
     id: r.id, hn: r.hn, visitId: r.visit_id, patname: r.patname, date: r.date,
     items: Array.isArray(r.items) ? r.items : (r.items ? JSON.parse(r.items) : []),
@@ -534,24 +582,27 @@ function ClinicDashboard() {
         const dbRow = toDbVisit(v);
         let result;
         if (existedInDb) {
-            // Update existing record
             result = await supa.patch('visits', 'id', v.id, dbRow);
-            if (result === null) {
+            if (result === null || (result && result._error)) {
                 console.warn('saveVisit: PATCH failed, trying INSERT');
                 result = await supa.insert('visits', dbRow);
             }
-        } else {
-            // New record — INSERT first, fallback to PATCH on conflict
+        }
+        else {
             result = await supa.insert('visits', dbRow);
-            if (result === null) {
+            if (result === null || (result && result._error)) {
                 console.warn('saveVisit: INSERT failed, trying PATCH');
                 result = await supa.patch('visits', 'id', v.id, dbRow);
             }
         }
-        if (result === 'RLS_ERROR') { setRlsError(true); return null; }
-        if (result === null) {
-            console.error('saveVisit: all DB write attempts failed for visit', v.id);
-            setSaveError(true);
+        if (result === 'RLS_ERROR') {
+            setRlsError(true);
+            return null;
+        }
+        if (result === null || (result && result._error)) {
+            const errMsg = (result && result._error) ? result._error : 'ไม่ทราบสาเหตุ — ดู Console';
+            console.error('saveVisit: all DB write attempts failed for visit', v.id, errMsg);
+            setSaveError(errMsg);
         }
         return result;
     };
@@ -593,7 +644,7 @@ function ClinicDashboard() {
         await supa.delete('medicines', 'id', id);
     };
     const patchMedicineStock = async (medId, newStock) => {
-        setMedicines(prev => prev.map(m => m.id === medId ? { ...m, stock: newStock } : m));
+        setMedicines(prev => prev.map(m => m.id === medId ? Object.assign(Object.assign({}, m), { stock: newStock }) : m));
         await supa.patch('medicines', 'id', medId, { stock: newStock });
     };
     const saveTreatmentService = async (s) => {
@@ -657,32 +708,41 @@ function ClinicDashboard() {
             : dbReady
                 ? React.createElement("span", null, "\u2705 \u0E40\u0E0A\u0E37\u0E48\u0E2D\u0E21\u0E15\u0E48\u0E2D Supabase \u0E41\u0E25\u0E49\u0E27 \u2014 \u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25\u0E1A\u0E31\u0E19\u0E17\u0E36\u0E01\u0E2D\u0E31\u0E15\u0E42\u0E19\u0E21\u0E31\u0E15\u0E34")
                 : React.createElement("span", null, "\u23F3 \u0E01\u0E33\u0E25\u0E31\u0E07\u0E40\u0E0A\u0E37\u0E48\u0E2D\u0E21\u0E15\u0E48\u0E2D...")))),
-        rlsError && React.createElement("div", { style: { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 9998, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 } },
+        rlsError && (React.createElement("div", { style: { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 9998, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 } },
             React.createElement("div", { style: { background: '#fff', borderRadius: 12, padding: 24, maxWidth: 540, width: '100%', boxShadow: '0 8px 40px rgba(0,0,0,0.3)' } },
                 React.createElement("div", { style: { fontSize: 20, fontWeight: 700, color: '#c0392b', marginBottom: 8 } }, "\uD83D\uDD12 Supabase \u0E44\u0E21\u0E48\u0E2D\u0E19\u0E38\u0E0D\u0E32\u0E15\u0E43\u0E2B\u0E49\u0E1A\u0E31\u0E19\u0E17\u0E36\u0E01\u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25"),
                 React.createElement("div", { style: { fontSize: 14, color: '#444', marginBottom: 16, lineHeight: 1.7 } },
-                    "\u0E15\u0E32\u0E23\u0E32\u0E07\u0E43\u0E19\u0E10\u0E32\u0E19\u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25\u0E40\u0E1B\u0E34\u0E14 ", React.createElement("b", null, "Row Level Security (RLS)"), " \u0E44\u0E27\u0E49 \u0E41\u0E15\u0E48\u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E21\u0E35 Policy \u0E17\u0E35\u0E48\u0E2D\u0E19\u0E38\u0E0D\u0E32\u0E15\u0E43\u0E2B\u0E49 anon role INSERT/UPDATE", React.createElement("br", null),
-                    "\u0E43\u0E2B\u0E49\u0E23\u0E31\u0E19 SQL \u0E14\u0E49\u0E32\u0E19\u0E25\u0E48\u0E32\u0E07\u0E43\u0E19 ", React.createElement("b", null, "Supabase \u2192 SQL Editor"), " \u0E40\u0E1E\u0E37\u0E48\u0E2D\u0E41\u0E01\u0E49\u0E44\u0E02:"),
-                React.createElement("pre", { style: { background: '#1e1e1e', color: '#9cdcfe', borderRadius: 8, padding: 14, fontSize: 11, overflowX: 'auto', marginBottom: 16, lineHeight: 1.6 } },
-                    `-- วิ่งใน Supabase SQL Editor\nDO $$\nDECLARE t text;\nBEGIN\n  FOREACH t IN ARRAY ARRAY['patients','visits','receipts','appointments','medicines','treatment_services']\n  LOOP\n    EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', t);\n    EXECUTE format(\n      'CREATE POLICY IF NOT EXISTS "anon_all" ON %I FOR ALL TO anon USING (true) WITH CHECK (true)', t);\n  END LOOP;\nEND $$;`),
+                    "\u0E15\u0E32\u0E23\u0E32\u0E07\u0E43\u0E19\u0E10\u0E32\u0E19\u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25\u0E40\u0E1B\u0E34\u0E14 ",
+                    React.createElement("b", null, "Row Level Security (RLS)"),
+                    " \u0E44\u0E27\u0E49 \u0E41\u0E15\u0E48\u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E21\u0E35 Policy \u0E17\u0E35\u0E48\u0E2D\u0E19\u0E38\u0E0D\u0E32\u0E15\u0E43\u0E2B\u0E49 anon role INSERT/UPDATE",
+                    React.createElement("br", null),
+                    "\u0E43\u0E2B\u0E49\u0E23\u0E31\u0E19 SQL \u0E14\u0E49\u0E32\u0E19\u0E25\u0E48\u0E32\u0E07\u0E43\u0E19 ",
+                    React.createElement("b", null, "Supabase \u2192 SQL Editor"),
+                    " \u0E40\u0E1E\u0E37\u0E48\u0E2D\u0E41\u0E01\u0E49\u0E44\u0E02:"),
+                React.createElement("pre", { style: { background: '#1e1e1e', color: '#9cdcfe', borderRadius: 8, padding: 14, fontSize: 11, overflowX: 'auto', marginBottom: 16, lineHeight: 1.6 } }, `-- วิ่งใน Supabase SQL Editor
+DO $$
+DECLARE t text;
+BEGIN
+  FOREACH t IN ARRAY ARRAY['patients','visits','receipts','appointments','medicines','treatment_services']
+  LOOP
+    EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', t);
+    EXECUTE format(
+      'CREATE POLICY IF NOT EXISTS "anon_all" ON %I FOR ALL TO anon USING (true) WITH CHECK (true)', t);
+  END LOOP;
+END $$;`),
                 React.createElement("div", { style: { display: 'flex', gap: 8 } },
-                    React.createElement("button", {
-                        onClick: () => {
+                    React.createElement("button", { onClick: () => {
                             const sql = `DO $$\nDECLARE t text;\nBEGIN\n  FOREACH t IN ARRAY ARRAY['patients','visits','receipts','appointments','medicines','treatment_services']\n  LOOP\n    EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', t);\n    EXECUTE format(\n      'CREATE POLICY IF NOT EXISTS "anon_all" ON %I FOR ALL TO anon USING (true) WITH CHECK (true)', t);\n  END LOOP;\nEND $$;`;
-                            navigator.clipboard.writeText(sql).then(() => alert('\u2705 \u0E04\u0E31\u0E14\u0E25\u0E2D\u0E01 SQL \u0E41\u0E25\u0E49\u0E27 \u2014 \u0E27\u0E32\u0E07\u0E43\u0E19 Supabase SQL Editor \u0E41\u0E25\u0E49\u0E27\u0E01\u0E14 Run'));
-                        },
-                        style: { flex: 1, background: '#2e86c1', color: '#fff', border: 'none', borderRadius: 7, padding: '10px 0', fontSize: 14, fontWeight: 700, cursor: 'pointer' }
-                    }, "\uD83D\uDCCB \u0E04\u0E31\u0E14\u0E25\u0E2D\u0E01 SQL"),
-                    React.createElement("button", {
-                        onClick: () => setRlsError(false),
-                        style: { flex: 1, background: '#eee', color: '#333', border: 'none', borderRadius: 7, padding: '10px 0', fontSize: 14, cursor: 'pointer' }
-                    }, "\u0E1B\u0E34\u0E14 (\u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25\u0E16\u0E39\u0E01\u0E1A\u0E31\u0E19\u0E17\u0E36\u0E01\u0E43\u0E19\u0E2B\u0E19\u0E49\u0E32\u0E08\u0E2D\u0E41\u0E25\u0E49\u0E27)")))),
-        saveError && React.createElement("div", { style: { position: 'fixed', bottom: 0, left: 0, right: 0, background: '#c0392b', color: '#fff', padding: '14px 20px', zIndex: 9997, fontSize: 13, boxShadow: '0 -4px 20px rgba(0,0,0,0.3)' } },
-            React.createElement("div", { style: { display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 } },
-                React.createElement("div", null,
-                    React.createElement("b", null, "⚠️ DB Error: "),
-                    React.createElement("span", null, supa._lastError || 'unknown error')),
-                React.createElement("button", { onClick: () => setSaveError(false), style: { background: 'rgba(255,255,255,0.2)', border: 'none', color: '#fff', borderRadius: 6, padding: '4px 12px', cursor: 'pointer', fontSize: 13, flexShrink: 0 } }, "ปิด"))),
+                            navigator.clipboard.writeText(sql).then(() => alert('✅ คัดลอก SQL แล้ว — วางใน Supabase SQL Editor แล้วกด Run'));
+                        }, style: { flex: 1, background: '#2e86c1', color: '#fff', border: 'none', borderRadius: 7, padding: '10px 0', fontSize: 14, fontWeight: 700, cursor: 'pointer' } }, "\uD83D\uDCCB \u0E04\u0E31\u0E14\u0E25\u0E2D\u0E01 SQL"),
+                    React.createElement("button", { onClick: () => setRlsError(false), style: { flex: 1, background: '#eee', color: '#333', border: 'none', borderRadius: 7, padding: '10px 0', fontSize: 14, cursor: 'pointer' } }, "\u0E1B\u0E34\u0E14 (\u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25\u0E16\u0E39\u0E01\u0E1A\u0E31\u0E19\u0E17\u0E36\u0E01\u0E43\u0E19\u0E2B\u0E19\u0E49\u0E32\u0E08\u0E2D\u0E41\u0E25\u0E49\u0E27)"))))),
+        saveError && (React.createElement("div", { style: { position: 'fixed', bottom: 0, left: 0, right: 0, background: '#c0392b', color: '#fff', padding: '14px 20px', zIndex: 9997, display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 14, boxShadow: '0 -4px 20px rgba(0,0,0,0.3)' } },
+            React.createElement("div", { style: { flex: 1, minWidth: 0 } },
+                React.createElement("b", null, "\u26A0\uFE0F \u0E44\u0E21\u0E48\u0E2A\u0E32\u0E21\u0E32\u0E23\u0E16\u0E1A\u0E31\u0E19\u0E17\u0E36\u0E01\u0E25\u0E07\u0E10\u0E32\u0E19\u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25\u0E44\u0E14\u0E49 \u2014 \u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25\u0E08\u0E30\u0E2B\u0E32\u0E22\u0E40\u0E21\u0E37\u0E48\u0E2D\u0E23\u0E35\u0E40\u0E1F\u0E23\u0E0A"),
+                typeof saveError === 'string' && saveError !== 'true' && (React.createElement("div", { style: { fontSize: 11, marginTop: 4, opacity: 0.9, fontFamily: 'monospace', wordBreak: 'break-all' } },
+                    "\u0E2A\u0E32\u0E40\u0E2B\u0E15\u0E38: ",
+                    saveError))),
+            React.createElement("button", { onClick: () => setSaveError(false), style: { background: 'rgba(255,255,255,0.2)', border: 'none', color: '#fff', borderRadius: 6, padding: '6px 14px', cursor: 'pointer', fontSize: 13, marginLeft: 12, flexShrink: 0 } }, "\u0E1B\u0E34\u0E14"))),
         React.createElement("div", { style: { background: `linear-gradient(135deg,#1a5276,#2e86c1)`, color: '#fff', padding: '0 0 0 0', boxShadow: '0 2px 12px rgba(26,82,118,0.25)' } },
             React.createElement("div", { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 24px 0' } },
                 React.createElement("div", { style: { display: 'flex', alignItems: 'center', gap: 14 } },
@@ -743,26 +803,32 @@ function DashboardPage({ todayVisits, todayAppoints, lowStock, monthRevenue, pat
                 React.createElement("div", { className: "card" },
                     React.createElement("div", { style: { fontWeight: 700, fontSize: 14, color: 'var(--primary)', marginBottom: 10 } }, "\uD83D\uDCCB \u0E01\u0E32\u0E23\u0E15\u0E23\u0E27\u0E08\u0E25\u0E48\u0E32\u0E2A\u0E38\u0E14"),
                     recentVisits.length === 0 && React.createElement("div", { className: "text-gray text-sm" }, "\u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E21\u0E35\u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25"),
-                    recentVisits.map(v => (React.createElement("div", { key: v.id, style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid var(--gray-light)' } },
-                        React.createElement("div", null,
-                            React.createElement("span", { style: { fontWeight: 600, fontSize: 13, color: 'var(--primary)' } },
-                                "HN ",
-                                v.hn),
-                            React.createElement("span", { style: { fontSize: 12, color: 'var(--gray)', marginLeft: 8 } },
-                                v.cc?.slice(0, 25),
-                                v.cc?.length > 25 ? '...' : '')),
-                        React.createElement("span", { className: "text-xs text-gray" }, thaiDate(v.date)))))),
+                    recentVisits.map(v => {
+                        var _a, _b;
+                        return (React.createElement("div", { key: v.id, style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid var(--gray-light)' } },
+                            React.createElement("div", null,
+                                React.createElement("span", { style: { fontWeight: 600, fontSize: 13, color: 'var(--primary)' } },
+                                    "HN ",
+                                    v.hn),
+                                React.createElement("span", { style: { fontSize: 12, color: 'var(--gray)', marginLeft: 8 } }, (_a = v.cc) === null || _a === void 0 ? void 0 :
+                                    _a.slice(0, 25),
+                                    ((_b = v.cc) === null || _b === void 0 ? void 0 : _b.length) > 25 ? '...' : '')),
+                            React.createElement("span", { className: "text-xs text-gray" }, thaiDate(v.date))));
+                    })),
                 React.createElement("div", { className: "card" },
                     React.createElement("div", { style: { fontWeight: 700, fontSize: 14, color: 'var(--primary)', marginBottom: 10 } }, "\uD83D\uDCC5 \u0E19\u0E31\u0E14\u0E2B\u0E21\u0E32\u0E22\u0E17\u0E35\u0E48\u0E01\u0E33\u0E25\u0E31\u0E07\u0E08\u0E30\u0E21\u0E32\u0E16\u0E36\u0E07"),
                     upcomingAppoints.length === 0 && React.createElement("div", { className: "text-gray text-sm" }, "\u0E44\u0E21\u0E48\u0E21\u0E35\u0E01\u0E32\u0E23\u0E19\u0E31\u0E14\u0E2B\u0E21\u0E32\u0E22"),
-                    upcomingAppoints.map(a => (React.createElement("div", { key: a.id, style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid var(--gray-light)' } },
-                        React.createElement("div", null,
-                            React.createElement("span", { style: { fontWeight: 600, fontSize: 13 } }, a.patname),
-                            React.createElement("div", { style: { fontSize: 11, color: 'var(--gray)' } }, a.reason?.slice(0, 30))),
-                        React.createElement("span", { className: "text-xs text-gray" },
-                            thaiDate(a.date),
-                            " ",
-                            a.time))))),
+                    upcomingAppoints.map(a => {
+                        var _a;
+                        return (React.createElement("div", { key: a.id, style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid var(--gray-light)' } },
+                            React.createElement("div", null,
+                                React.createElement("span", { style: { fontWeight: 600, fontSize: 13 } }, a.patname),
+                                React.createElement("div", { style: { fontSize: 11, color: 'var(--gray)' } }, (_a = a.reason) === null || _a === void 0 ? void 0 : _a.slice(0, 30))),
+                            React.createElement("span", { className: "text-xs text-gray" },
+                                thaiDate(a.date),
+                                " ",
+                                a.time)));
+                    })),
                 React.createElement("div", { className: "card", style: { gridColumn: '1/-1' } },
                     React.createElement("div", { style: { fontWeight: 700, fontSize: 14, color: 'var(--danger)', marginBottom: 10 } }, "\u26A0\uFE0F \u0E22\u0E32\u0E17\u0E35\u0E48\u0E15\u0E49\u0E2D\u0E07\u0E23\u0E30\u0E27\u0E31\u0E07 (\u0E2A\u0E15\u0E4A\u0E2D\u0E01\u0E15\u0E48\u0E33 / \u0E43\u0E01\u0E25\u0E49\u0E2B\u0E21\u0E14\u0E2D\u0E32\u0E22\u0E38)"),
                     medicines.filter(m => m.stock <= m.minstock || ((new Date(m.expire) - new Date()) / (1000 * 60 * 60 * 24) < 90)).length === 0 && React.createElement("div", { className: "text-gray text-sm" }, "\u0E17\u0E38\u0E01\u0E23\u0E32\u0E22\u0E01\u0E32\u0E23\u0E1B\u0E01\u0E15\u0E34"),
@@ -1129,7 +1195,7 @@ function RegisterPage({ patients, savePatient, visits, saveVisit, nextHN, nextVI
     const [intake, setIntake] = useState({ cc: '', temp: '', bp_sys: '', bp_dia: '', pr: '', rr: '', o2: '', weight: '', height: '', nurse: '' });
     const [lastRegistered, setLastRegistered] = useState(null);
     const [selectedPat, setSelectedPat] = useState(null);
-    const fi = (k, v) => setIntake(prev => ({ ...prev, [k]: v }));
+    const fi = (k, v) => setIntake(prev => (Object.assign(Object.assign({}, prev), { [k]: v })));
     const filtered = patients.filter(p => {
         const q = search.toLowerCase();
         return (p.fname || '').toLowerCase().includes(q) || (p.lname || '').toLowerCase().includes(q) ||
@@ -1141,7 +1207,7 @@ function RegisterPage({ patients, savePatient, visits, saveVisit, nextHN, nextVI
             return;
         }
         const hn = nextHN();
-        const newP = { ...form, hn, created_at: new Date().toISOString() };
+        const newP = Object.assign(Object.assign({}, form), { hn, created_at: new Date().toISOString() });
         await savePatient(newP);
         const hasIntake = Object.values(intake).some(v => v && String(v).trim());
         let visitId = null;
@@ -1274,7 +1340,7 @@ function RegisterPage({ patients, savePatient, visits, saveVisit, nextHN, nextVI
         subpage === 'detail' && selectedPat && (React.createElement(PatientDetail, { pat: selectedPat, visits: getVisitsForHN(selectedPat.hn), onBack: () => setSubpage('list'), patients: patients, savePatient: savePatient, treatmentServices: treatmentServices, saveVisit: saveVisit, nextVID: nextVID, allVisits: visits }))));
 }
 function PatientForm({ form, setForm }) {
-    const f = (k, v) => setForm(prev => ({ ...prev, [k]: v }));
+    const f = (k, v) => setForm(prev => (Object.assign(Object.assign({}, prev), { [k]: v })));
     return (React.createElement("div", null,
         React.createElement("div", { style: { background: 'var(--gray-pale)', borderRadius: 8, padding: '12px 14px', marginBottom: 12 } },
             React.createElement("div", { style: { fontWeight: 700, fontSize: 13, color: 'var(--primary)', marginBottom: 10 } }, "\u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25\u0E2A\u0E48\u0E27\u0E19\u0E15\u0E31\u0E27"),
@@ -1353,11 +1419,11 @@ function PatientForm({ form, setForm }) {
 function PatientDetail({ pat, visits, onBack, patients, savePatient, treatmentServices, saveVisit, nextVID, allVisits }) {
     const [tab, setTab] = useState('info');
     const [editing, setEditing] = useState(false);
-    const [form, setForm] = useState({ ...pat });
+    const [form, setForm] = useState(Object.assign({}, pat));
     const [showNewQueue, setShowNewQueue] = useState(false);
     const [intake, setIntake] = useState({ cc: '', temp: '', bp_sys: '', bp_dia: '', pr: '', rr: '', o2: '', weight: '', height: '', nurse: '' });
     const [newQueueResult, setNewQueueResult] = useState(null);
-    const fi = (k, v) => setIntake(prev => ({ ...prev, [k]: v }));
+    const fi = (k, v) => setIntake(prev => (Object.assign(Object.assign({}, prev), { [k]: v })));
     const age = (dob) => { if (!dob)
         return '-'; const d = new Date() - new Date(dob); return Math.floor(d / (365.25 * 24 * 60 * 60 * 1000)) + ' ปี'; };
     const save = async () => { await savePatient(form); setEditing(false); alert('บันทึกข้อมูลเรียบร้อย'); };
@@ -1370,7 +1436,7 @@ function PatientDetail({ pat, visits, onBack, patients, savePatient, treatmentSe
     const sortedVisits = [...visits].sort((a, b) => (b.date || '').localeCompare(a.date || '') || (b.id || '').localeCompare(a.id || ''));
     const totalVisitPages = Math.max(1, Math.ceil(sortedVisits.length / VISITS_PER_PAGE));
     const pagedVisits = sortedVisits.slice((visitPage - 1) * VISITS_PER_PAGE, visitPage * VISITS_PER_PAGE);
-    const startEditVisit = (v) => { setEditingVisit(v.id); setEditVform({ ...v }); };
+    const startEditVisit = (v) => { setEditingVisit(v.id); setEditVform(Object.assign({}, v)); };
     const cancelEditVisit = () => { setEditingVisit(null); setEditVform(null); };
     const saveEditVisit = async () => {
         if (!saveVisit) {
@@ -1565,7 +1631,7 @@ function ExaminePage({ patients, visits, saveVisit, nextVID, getPatient, getVisi
     const loadVisit = (p, v) => {
         setSearchResults([]);
         setPat(p);
-        setVform({ ...v, drugs: v.drugs || [], services: v.services || [] });
+        setVform(Object.assign(Object.assign({}, v), { drugs: v.drugs || [], services: v.services || [] }));
         setSaved(false);
     };
     const loadPatient = async (p) => {
@@ -1575,7 +1641,7 @@ function ExaminePage({ patients, visits, saveVisit, nextVID, getPatient, getVisi
         const todaysVisits = visits.filter(v => v.hn === p.hn && v.date === today).sort((a, b) => (a.queueNo || a.id || '').localeCompare(b.queueNo || b.id || ''));
         const pendingQueue = todaysVisits.find(v => v.status === 'รอตรวจ' || ((!v.status) && !v.dx && !v.pe));
         if (pendingQueue) {
-            setVform({ ...pendingQueue, drugs: pendingQueue.drugs || [], services: pendingQueue.services || [] });
+            setVform(Object.assign(Object.assign({}, pendingQueue), { drugs: pendingQueue.drugs || [], services: pendingQueue.services || [] }));
         }
         else {
             // Create a fresh visit and immediately persist it to DB so it survives refresh
@@ -1608,14 +1674,14 @@ function ExaminePage({ patients, visits, saveVisit, nextVID, getPatient, getVisi
         .map(v => ({ visit: v, pat: getPatient(v.hn) }))
         .filter(q => q.pat);
     const save = async () => {
-        const completed = { ...vform, status: 'ตรวจเสร็จ' };
+        const completed = Object.assign(Object.assign({}, vform), { status: 'ตรวจเสร็จ' });
         setVform(completed);
         setSaved(true);
         setLastVisit(completed);
         const result = await saveVisit(completed);
         if (result === null) {
             console.error('save: DB write failed');
-            // rlsError modal is shown by saveVisit if it's a permissions issue
+            // rlsError is set by saveVisit if it detected a permissions issue
         }
         else {
             alert('✅ บันทึกการตรวจเรียบร้อย\nย้ายผู้ป่วยไปที่ "ตรวจเสร็จแล้ว" แล้ว');
@@ -1651,7 +1717,7 @@ function ExaminePage({ patients, visits, saveVisit, nextVID, getPatient, getVisi
             }
         }
         // Mark visit done and save full record
-        const completed = { ...vform, status: 'ตรวจเสร็จ' };
+        const completed = Object.assign(Object.assign({}, vform), { status: 'ตรวจเสร็จ' });
         const vResult = await saveVisit(completed);
         if (vResult === null) {
             console.error('issueReceiptOnly: visit status save failed');
@@ -1706,7 +1772,7 @@ function ExaminePage({ patients, visits, saveVisit, nextVID, getPatient, getVisi
                     "\u0E15\u0E23\u0E27\u0E08\u0E41\u0E25\u0E49\u0E27 ",
                     todayQueueDone.length)),
             todayQueue.length === 0 && todayQueueDone.length === 0 && (React.createElement("div", { style: { fontSize: 13, color: 'var(--gray)', padding: '8px 0' } }, "\u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E21\u0E35\u0E04\u0E34\u0E27\u0E15\u0E23\u0E27\u0E08\u0E27\u0E31\u0E19\u0E19\u0E35\u0E49 \u2014 \u0E04\u0E34\u0E27\u0E08\u0E30\u0E16\u0E39\u0E01\u0E2A\u0E23\u0E49\u0E32\u0E07\u0E08\u0E32\u0E01\u0E2B\u0E19\u0E49\u0E32 \"\u0E25\u0E07\u0E17\u0E30\u0E40\u0E1A\u0E35\u0E22\u0E19\"")),
-            todayQueue.length > 0 && (React.createElement("div", { style: { display: 'flex', flexDirection: 'column', gap: 6 } }, todayQueue.map(({ visit, pat: qp }, idx) => (React.createElement("div", { key: visit.id, onClick: () => loadVisit(qp, visit), style: { display: 'flex', alignItems: 'center', gap: 12, padding: '9px 12px', background: vform?.id === visit.id ? '#fff3e0' : '#fffaf0', border: `1.5px solid ${vform?.id === visit.id ? '#e67e22' : '#fde3c4'}`, borderRadius: 8, cursor: 'pointer' } },
+            todayQueue.length > 0 && (React.createElement("div", { style: { display: 'flex', flexDirection: 'column', gap: 6 } }, todayQueue.map(({ visit, pat: qp }, idx) => (React.createElement("div", { key: visit.id, onClick: () => loadVisit(qp, visit), style: { display: 'flex', alignItems: 'center', gap: 12, padding: '9px 12px', background: (vform === null || vform === void 0 ? void 0 : vform.id) === visit.id ? '#fff3e0' : '#fffaf0', border: `1.5px solid ${(vform === null || vform === void 0 ? void 0 : vform.id) === visit.id ? '#e67e22' : '#fde3c4'}`, borderRadius: 8, cursor: 'pointer' } },
                 React.createElement("div", { style: { width: 36, height: 36, borderRadius: '50%', background: '#e67e22', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 14, flexShrink: 0 } }, idx + 1),
                 React.createElement("div", { style: { flex: 1, minWidth: 0 } },
                     React.createElement("div", { style: { fontWeight: 700, fontSize: 13, color: 'var(--gray-dark)' } },
@@ -1732,8 +1798,8 @@ function ExaminePage({ patients, visits, saveVisit, nextVID, getPatient, getVisi
                 React.createElement("span", { style: { fontSize: 11, color: 'var(--gray)', marginLeft: 4 } }, "\u0E04\u0E25\u0E34\u0E01\u0E40\u0E1E\u0E37\u0E48\u0E2D\u0E40\u0E1B\u0E34\u0E14/\u0E41\u0E01\u0E49\u0E44\u0E02\u0E1A\u0E31\u0E19\u0E17\u0E36\u0E01\u0E01\u0E32\u0E23\u0E15\u0E23\u0E27\u0E08")),
             todayQueueDone.length === 0 && (React.createElement("div", { style: { fontSize: 13, color: 'var(--gray)', padding: '4px 0' } }, "\u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E21\u0E35\u0E1C\u0E39\u0E49\u0E1B\u0E48\u0E27\u0E22\u0E17\u0E35\u0E48\u0E15\u0E23\u0E27\u0E08\u0E40\u0E2A\u0E23\u0E47\u0E08\u0E27\u0E31\u0E19\u0E19\u0E35\u0E49")),
             todayQueueDone.length > 0 && (React.createElement("div", { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(280px,1fr))', gap: 8 } }, todayQueueDone.map(({ visit: dv, pat: dp }, idx) => {
-                const isActive = vform?.id === dv.id;
-                const receipt = typeof receipts !== 'undefined' ? receipts?.find(r => r.visitId === dv.id) : null;
+                const isActive = (vform === null || vform === void 0 ? void 0 : vform.id) === dv.id;
+                const receipt = typeof receipts !== 'undefined' ? receipts === null || receipts === void 0 ? void 0 : receipts.find(r => r.visitId === dv.id) : null;
                 return (React.createElement("div", { key: dv.id, onClick: () => loadVisit(dp, dv), style: {
                         display: 'flex', alignItems: 'flex-start', gap: 10, padding: '10px 12px',
                         background: isActive ? '#e8f8f0' : '#f4fbf7',
@@ -2045,7 +2111,7 @@ function printMedLabel(drug, pat, visitDate) {
     <div class="freq">📋 ${drug.freq || '-'}</div>
     <div style="height:4px;"></div>
     <div class="row"><span>ผู้ป่วย:</span><span><b>${pat ? pat.prefix + pat.fname + ' ' + pat.lname : '—'}</b></span></div>
-    <div class="row"><span>HN:</span><span>${pat?.hn || '—'}</span></div>
+    <div class="row"><span>HN:</span><span>${(pat === null || pat === void 0 ? void 0 : pat.hn) || '—'}</span></div>
     <div class="row"><span>วันที่จ่ายยา:</span><span>${thaiDate(visitDate || today())}</span></div>
     <div class="footer">
       <div>แพทย์ผู้สั่ง: ${DOCTOR_NAME} (${DOCTOR_LICENSE})</div>
@@ -2074,7 +2140,7 @@ function TreatmentOrderBox({ services, onServicesChange, treatmentServices, read
     const addService = (svc) => {
         const existing = services.find(s => s.serviceId === svc.id);
         if (existing) {
-            onServicesChange(services.map(s => s.serviceId === svc.id ? { ...s, qty: (s.qty || 1) + 1 } : s));
+            onServicesChange(services.map(s => s.serviceId === svc.id ? Object.assign(Object.assign({}, s), { qty: (s.qty || 1) + 1 }) : s));
         }
         else {
             onServicesChange([...services, { serviceId: svc.id, name: svc.name, qty: 1, unit: svc.unit, price: svc.price, category: svc.category }]);
@@ -2083,7 +2149,7 @@ function TreatmentOrderBox({ services, onServicesChange, treatmentServices, read
         setShowDropdown(false);
     };
     const rmService = (i) => onServicesChange(services.filter((_, idx) => idx !== i));
-    const updService = (i, k, v) => onServicesChange(services.map((s, idx) => idx === i ? { ...s, [k]: k === 'qty' || k === 'price' ? Number(v) : v } : s));
+    const updService = (i, k, v) => onServicesChange(services.map((s, idx) => idx === i ? Object.assign(Object.assign({}, s), { [k]: k === 'qty' || k === 'price' ? Number(v) : v }) : s));
     const total = services.reduce((s, i) => s + (i.qty || 1) * i.price, 0);
     return (React.createElement("div", { style: { background: 'linear-gradient(135deg,#e8f8f0,#f0fff8)', border: '2px solid #1e8449', borderRadius: 10, padding: '12px 14px', marginBottom: 10 } },
         React.createElement("div", { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 } },
@@ -2145,12 +2211,12 @@ function TreatmentOrderBox({ services, onServicesChange, treatmentServices, read
 }
 // ===================== VISIT RECORD =====================
 function VisitRecord({ v, setV, pat, readOnly, medicines, treatmentServices }) {
-    const f = (k, val) => setV && setV(prev => ({ ...prev, [k]: val }));
+    const f = (k, val) => setV && setV(prev => (Object.assign(Object.assign({}, prev), { [k]: val })));
     const drugs = v.drugs || [];
     const services = v.services || [];
-    const addDrug = (d) => f('drugs', [...drugs, { ...d }]);
+    const addDrug = (d) => f('drugs', [...drugs, Object.assign({}, d)]);
     const rmDrug = (i) => f('drugs', drugs.filter((_, idx) => idx !== i));
-    const updDrug = (i, k, val) => f('drugs', drugs.map((d, idx) => idx === i ? { ...d, [k]: val } : d));
+    const updDrug = (i, k, val) => f('drugs', drugs.map((d, idx) => idx === i ? Object.assign(Object.assign({}, d), { [k]: val }) : d));
     return (React.createElement("div", null,
         React.createElement("div", { style: { background: 'var(--gray-pale)', borderRadius: 8, padding: '10px 14px', marginBottom: 12 } },
             React.createElement("div", { style: { fontWeight: 700, fontSize: 12, color: 'var(--primary)', marginBottom: 8 } }, "\uD83D\uDD34 \u0E2A\u0E31\u0E0D\u0E0D\u0E32\u0E13\u0E0A\u0E35\u0E1E (Vital Signs)"),
@@ -2180,7 +2246,7 @@ function VisitRecord({ v, setV, pat, readOnly, medicines, treatmentServices }) {
             React.createElement("div", { className: "divider" }),
             React.createElement("div", null,
                 React.createElement("label", { style: { fontWeight: 700, color: 'var(--gray-dark)' } }, "TX. (\u0E01\u0E32\u0E23\u0E23\u0E31\u0E01\u0E29\u0E32 / \u0E04\u0E33\u0E2A\u0E31\u0E48\u0E07\u0E01\u0E32\u0E23\u0E23\u0E31\u0E01\u0E29\u0E32)"),
-                !readOnly && medicines && (React.createElement(DrugAutocomplete, { medicines: medicines, onAdd: addDrug, allergyList: pat?.allergy })),
+                !readOnly && medicines && (React.createElement(DrugAutocomplete, { medicines: medicines, onAdd: addDrug, allergyList: pat === null || pat === void 0 ? void 0 : pat.allergy })),
                 drugs.length > 0 && (React.createElement("div", { style: { background: '#f4fbf7', border: '1.5px solid #aeddc8', borderRadius: 7, padding: '8px 10px', marginBottom: 10 } },
                     React.createElement("div", { style: { fontWeight: 700, fontSize: 12, color: '#1e8449', marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' } },
                         React.createElement("span", null,
@@ -2244,6 +2310,7 @@ const CERT_DISEASES_5 = [
     { key: 'd5', label: '(5) โรคติดต่อร้ายแรงหรือโรคเรื้อรังที่ปรากฏอาการเด่นชัดหรือรุนแรงและเป็นอุปสรรคต่อการปฏิบัติงานในหน้าที่ตามที่ ก.พ. กำหนด' },
 ];
 function CertPage({ patients, visits, getPatient }) {
+    var _a;
     const [type, setType] = useState('sick');
     const [hn, setHn] = useState('');
     const [pat, setPat] = useState(null);
@@ -2278,7 +2345,7 @@ function CertPage({ patients, visits, getPatient }) {
         epilepsy: { has: false, detail: '' },
         other: { has: false, detail: '' },
     });
-    const updDrvHist = (k, f, v) => setDrvHist(prev => ({ ...prev, [k]: { ...prev[k], [f]: v } }));
+    const updDrvHist = (k, f, v) => setDrvHist(prev => (Object.assign(Object.assign({}, prev), { [k]: Object.assign(Object.assign({}, prev[k]), { [f]: v }) })));
     // Doctor exam
     const [drvBodyResult, setDrvBodyResult] = useState('normal'); // 'normal'|'abnormal'
     const [drvBodyNote, setDrvBodyNote] = useState('');
@@ -2291,7 +2358,7 @@ function CertPage({ patients, visits, getPatient }) {
         { key: 'd3', label: '3. โรคเท้าช้างในระยะที่ปรากฏอาการเป็นที่รังเกียจแก่สังคม', found: false, note: '' },
         { key: 'd4', label: '4. อื่น ๆ (ถ้ามี)', found: false, note: '' },
     ]);
-    const updDrvDisease = (i, f, v) => setDrvDiseases(prev => prev.map((d, idx) => idx === i ? { ...d, [f]: v } : d));
+    const updDrvDisease = (i, f, v) => setDrvDiseases(prev => prev.map((d, idx) => idx === i ? Object.assign(Object.assign({}, d), { [f]: v }) : d));
     const [drvConclusion, setDrvConclusion] = useState('');
     const searchPat = () => { const p = getPatient(hn.trim()); if (!p) {
         alert('ไม่พบผู้ป่วย');
@@ -2305,7 +2372,7 @@ function CertPage({ patients, visits, getPatient }) {
         { k: 'driving', l: 'ใบรับรองแพทย์ (ใบขับขี่)' },
     ];
     // ── Dot-line helper for print
-    const DotLine = ({ w = '100%', style = {} }) => React.createElement("span", { style: { display: 'inline-block', borderBottom: '1px dotted #555', minWidth: w, ...style, verticalAlign: 'bottom' } }, "\u00A0");
+    const DotLine = ({ w = '100%', style = {} }) => React.createElement("span", { style: Object.assign(Object.assign({ display: 'inline-block', borderBottom: '1px dotted #555', minWidth: w }, style), { verticalAlign: 'bottom' }) }, "\u00A0");
     const FieldLine = ({ label, value, onChange, width = '100%', inline = false, type = 'text' }) => (inline
         ? React.createElement("span", { style: { fontSize: 13 } },
             label,
@@ -2374,11 +2441,11 @@ function CertPage({ patients, visits, getPatient }) {
                 React.createElement("div", { style: { fontSize: 13, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' } },
                     React.createElement("span", null, "\u0E40\u0E25\u0E02\u0E1B\u0E23\u0E30\u0E08\u0E33\u0E15\u0E31\u0E27\u0E1B\u0E23\u0E30\u0E0A\u0E32\u0E0A\u0E19"),
                     React.createElement("div", { style: { display: 'flex', gap: 2 } },
-                        (pat?.idcard || '             ').replace(/-/g, '').split('').slice(0, 13).map((c, i) => (React.createElement("div", { key: i, style: { width: 22, height: 24, border: '1px solid #555', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 700, background: '#f8f8f8' } }, c || ''))),
-                        [...Array(Math.max(0, 13 - (pat?.idcard?.replace(/-/g, '') || '').length))].map((_, i) => (React.createElement("div", { key: 'e' + i, style: { width: 22, height: 24, border: '1px solid #555', background: '#f8f8f8' } }))))),
+                        ((pat === null || pat === void 0 ? void 0 : pat.idcard) || '             ').replace(/-/g, '').split('').slice(0, 13).map((c, i) => (React.createElement("div", { key: i, style: { width: 22, height: 24, border: '1px solid #555', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 700, background: '#f8f8f8' } }, c || ''))),
+                        [...Array(Math.max(0, 13 - (((_a = pat === null || pat === void 0 ? void 0 : pat.idcard) === null || _a === void 0 ? void 0 : _a.replace(/-/g, '')) || '').length))].map((_, i) => (React.createElement("div", { key: 'e' + i, style: { width: 22, height: 24, border: '1px solid #555', background: '#f8f8f8' } }))))),
                 React.createElement("div", { style: { fontSize: 13, marginBottom: 4 } },
                     "\u0E2A\u0E16\u0E32\u0E19\u0E17\u0E35\u0E48\u0E2D\u0E22\u0E39\u0E48\u0E17\u0E35\u0E48\u0E2A\u0E32\u0E21\u0E32\u0E23\u0E16\u0E15\u0E34\u0E14\u0E15\u0E48\u0E2D\u0E44\u0E14\u0E49",
-                    React.createElement("input", { value: pat?.address || '', onChange: () => { }, placeholder: "\u0E17\u0E35\u0E48\u0E2D\u0E22\u0E39\u0E48", style: { width: 'calc(100% - 200px)', marginLeft: 8, borderBottom: '1px dotted #888', border: 'none', outline: 'none', fontSize: 13, background: 'transparent', padding: '0 4px', display: 'inline-block' } })),
+                    React.createElement("input", { value: (pat === null || pat === void 0 ? void 0 : pat.address) || '', onChange: () => { }, placeholder: "\u0E17\u0E35\u0E48\u0E2D\u0E22\u0E39\u0E48", style: { width: 'calc(100% - 200px)', marginLeft: 8, borderBottom: '1px dotted #888', border: 'none', outline: 'none', fontSize: 13, background: 'transparent', padding: '0 4px', display: 'inline-block' } })),
                 React.createElement("div", { style: { fontSize: 13, marginBottom: 2, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' } },
                     React.createElement("span", null, "\u0E41\u0E25\u0E49\u0E27 \u0E40\u0E21\u0E37\u0E48\u0E2D\u0E27\u0E31\u0E19\u0E17\u0E35\u0E48"),
                     React.createElement("input", { type: "date", value: examDate, onChange: e => setExamDate(e.target.value), style: { width: 160, borderBottom: '1px dotted #888', border: 'none', outline: 'none', fontSize: 13, background: 'transparent', padding: '0 4px' } }),
@@ -2404,12 +2471,12 @@ function CertPage({ patients, visits, getPatient }) {
                     React.createElement("div", { style: { fontWeight: dis.key === 'd5' ? 600 : 400, fontStyle: dis.key === 'd5' ? 'italic' : '' } }, dis.label),
                     React.createElement("div", { style: { display: 'flex', gap: 16, alignItems: 'center', marginTop: 3, paddingLeft: 16 } },
                         React.createElement("label", { style: { display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, fontWeight: 400, cursor: 'pointer' } },
-                            React.createElement("input", { type: "radio", name: dis.key, checked: d5results[dis.key] === 'none', onChange: () => setD5results(p => ({ ...p, [dis.key]: 'none' })) }),
+                            React.createElement("input", { type: "radio", name: dis.key, checked: d5results[dis.key] === 'none', onChange: () => setD5results(p => (Object.assign(Object.assign({}, p), { [dis.key]: 'none' }))) }),
                             "\u0E44\u0E21\u0E48\u0E1E\u0E1A\u0E2B\u0E25\u0E31\u0E01\u0E10\u0E32\u0E19"),
                         React.createElement("label", { style: { display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, fontWeight: 400, cursor: 'pointer' } },
-                            React.createElement("input", { type: "radio", name: dis.key, checked: d5results[dis.key] === 'found', onChange: () => setD5results(p => ({ ...p, [dis.key]: 'found' })) }),
+                            React.createElement("input", { type: "radio", name: dis.key, checked: d5results[dis.key] === 'found', onChange: () => setD5results(p => (Object.assign(Object.assign({}, p), { [dis.key]: 'found' }))) }),
                             "\u0E1E\u0E1A"),
-                        d5results[dis.key] === 'found' && (React.createElement("input", { value: d5notes[dis.key], onChange: e => setD5notes(p => ({ ...p, [dis.key]: e.target.value })), placeholder: "\u0E23\u0E30\u0E1A\u0E38\u0E23\u0E32\u0E22\u0E25\u0E30\u0E40\u0E2D\u0E35\u0E22\u0E14", style: { flex: 1, borderBottom: '1px dotted #888', border: 'none', outline: 'none', fontSize: 12, background: 'transparent', padding: '0 4px' } })))))),
+                        d5results[dis.key] === 'found' && (React.createElement("input", { value: d5notes[dis.key], onChange: e => setD5notes(p => (Object.assign(Object.assign({}, p), { [dis.key]: e.target.value }))), placeholder: "\u0E23\u0E30\u0E1A\u0E38\u0E23\u0E32\u0E22\u0E25\u0E30\u0E40\u0E2D\u0E35\u0E22\u0E14", style: { flex: 1, borderBottom: '1px dotted #888', border: 'none', outline: 'none', fontSize: 12, background: 'transparent', padding: '0 4px' } })))))),
                 React.createElement("div", { style: { paddingLeft: 20, marginTop: 4 } },
                     React.createElement("div", { style: { fontStyle: 'italic', marginBottom: 4 } }, "(6) .............(\u0E16\u0E49\u0E32\u0E2B\u0E32\u0E01\u0E08\u0E33\u0E40\u0E1B\u0E47\u0E19\u0E15\u0E49\u0E2D\u0E07\u0E15\u0E23\u0E27\u0E08\u0E2B\u0E32\u0E42\u0E23\u0E04\u0E17\u0E35\u0E48\u0E40\u0E01\u0E35\u0E48\u0E22\u0E27\u0E02\u0E49\u0E2D\u0E07\u0E01\u0E31\u0E1A\u0E01\u0E32\u0E23\u0E1B\u0E0F\u0E34\u0E1A\u0E31\u0E15\u0E34\u0E07\u0E32\u0E19\u0E02\u0E2D\u0E07\u0E1C\u0E39\u0E49\u0E23\u0E31\u0E1A\u0E01\u0E32\u0E23\u0E15\u0E23\u0E27\u0E08\u0E43\u0E2B\u0E49\u0E23\u0E30\u0E1A\u0E38\u0E43\u0E19\u0E02\u0E49\u0E2D\u0E19\u0E35\u0E49)............"),
                     React.createElement("textarea", { value: d6note, onChange: e => setD6note(e.target.value), rows: 2, style: { width: '100%', resize: 'vertical', border: 'none', borderBottom: '1px solid #ccc', outline: 'none', fontSize: 12, fontFamily: 'inherit', background: 'transparent', padding: '2px 4px' }, placeholder: "\u0E1C\u0E25\u0E01\u0E32\u0E23\u0E15\u0E23\u0E27\u0E08\u0E40\u0E1E\u0E34\u0E48\u0E21\u0E40\u0E15\u0E34\u0E21 (\u0E16\u0E49\u0E32\u0E21\u0E35)" })),
@@ -2444,7 +2511,7 @@ function CertPage({ patients, visits, getPatient }) {
                                 const offsets = [0, 1, 5, 10, 12];
                                 const start = offsets[gi];
                                 const end = offsets[gi] + grpLen;
-                                const idStr = (pat?.idcard || '').replace(/-/g, '');
+                                const idStr = ((pat === null || pat === void 0 ? void 0 : pat.idcard) || '').replace(/-/g, '');
                                 return (React.createElement("div", { key: gi, style: { display: 'flex', gap: 1, alignItems: 'center' } },
                                     gi > 0 && React.createElement("span", { style: { margin: '0 2px', fontWeight: 700 } }, "-"),
                                     Array.from({ length: grpLen }).map((_, ci) => (React.createElement("div", { key: ci, style: { width: 20, height: 22, border: '1px solid #555', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, background: '#fafafa' } }, idStr[start + ci] || '')))));
@@ -2589,10 +2656,10 @@ function CertPage({ patients, visits, getPatient }) {
 function CertModal({ data, onClose, getPatient }) {
     const { pat, visit } = data;
     const [type, setType] = useState('sick');
-    const [form, setForm] = useState({ diagText: visit?.dx || '', restDays: '', fromDate: today(), toDate: '', doctorNote: '', certDate: today(), certNo: '' });
-    const f = (k, v) => setForm(prev => ({ ...prev, [k]: v }));
+    const [form, setForm] = useState({ diagText: (visit === null || visit === void 0 ? void 0 : visit.dx) || '', restDays: '', fromDate: today(), toDate: '', doctorNote: '', certDate: today(), certNo: '' });
+    const f = (k, v) => setForm(prev => (Object.assign(Object.assign({}, prev), { [k]: v })));
     const certTypes = [{ k: 'sick', l: 'อาการเจ็บป่วย' }, { k: 'group5', l: '5 กลุ่มโรค' }, { k: 'driving', l: 'ใบขับขี่' }];
-    const age = pat?.dob ? Math.floor((new Date() - new Date(pat.dob)) / (365.25 * 24 * 60 * 60 * 1000)) + ' ปี' : '';
+    const age = (pat === null || pat === void 0 ? void 0 : pat.dob) ? Math.floor((new Date() - new Date(pat.dob)) / (365.25 * 24 * 60 * 60 * 1000)) + ' ปี' : '';
     return (React.createElement(Modal, { title: "\uD83D\uDCC4 \u0E2D\u0E2D\u0E01\u0E43\u0E1A\u0E23\u0E31\u0E1A\u0E23\u0E2D\u0E07\u0E41\u0E1E\u0E17\u0E22\u0E4C", onClose: onClose, width: 720 },
         React.createElement("div", { style: { display: 'flex', gap: 8, marginBottom: 14 } }, certTypes.map(t => React.createElement("button", { key: t.k, className: `btn btn-sm ${type === t.k ? 'btn-primary' : 'btn-outline'}`, onClick: () => setType(t.k) }, t.l))),
         React.createElement("div", { id: "cert-modal-doc" },
@@ -2614,20 +2681,20 @@ function CertModal({ data, onClose, getPatient }) {
                 React.createElement("div", { style: { display: 'flex', gap: '8px 20px', flexWrap: 'wrap', background: 'var(--gray-pale)', borderRadius: 6, padding: '7px 10px', margin: '8px 0', fontSize: 12 } },
                     React.createElement("div", null,
                         "\u0E0A\u0E37\u0E48\u0E2D: ",
-                        React.createElement("b", null,
-                            pat?.prefix,
-                            pat?.fname,
-                            " ",
-                            pat?.lname)),
+                        React.createElement("b", null, pat === null || pat === void 0 ? void 0 :
+                            pat.prefix, pat === null || pat === void 0 ? void 0 :
+                            pat.fname,
+                            " ", pat === null || pat === void 0 ? void 0 :
+                            pat.lname)),
                     React.createElement("div", null,
                         "\u0E40\u0E1E\u0E28: ",
-                        React.createElement("b", null, pat?.gender)),
+                        React.createElement("b", null, pat === null || pat === void 0 ? void 0 : pat.gender)),
                     React.createElement("div", null,
                         "\u0E2D\u0E32\u0E22\u0E38: ",
                         React.createElement("b", null, age)),
                     React.createElement("div", null,
                         "\u0E1A\u0E31\u0E15\u0E23\u0E1B\u0E23\u0E30\u0E0A\u0E32\u0E0A\u0E19: ",
-                        React.createElement("b", null, pat?.idcard || '...........'))),
+                        React.createElement("b", null, (pat === null || pat === void 0 ? void 0 : pat.idcard) || '...........'))),
                 React.createElement("div", null,
                     "\u0E27\u0E31\u0E19\u0E17\u0E35\u0E48\u0E15\u0E23\u0E27\u0E08: ",
                     React.createElement("b", null, thaiDate(today()))),
@@ -2663,13 +2730,13 @@ function ReceiptPage({ receipts, saveReceipt, updateReceipt, deleteReceipt, pati
     const filtered = receipts.filter(r => {
         const q = search.trim().toLowerCase();
         const pat = getPatient(r.hn);
-        const fullname = ((pat?.fname || '') + ' ' + (pat?.lname || '')).toLowerCase();
+        const fullname = (((pat === null || pat === void 0 ? void 0 : pat.fname) || '') + ' ' + ((pat === null || pat === void 0 ? void 0 : pat.lname) || '')).toLowerCase();
         const nameMatch = !q ||
             (r.hn || '').toLowerCase().includes(q) ||
             (r.id || '').toLowerCase().includes(q) ||
             fullname.includes(q) ||
-            (pat?.fname || '').toLowerCase().includes(q) ||
-            (pat?.lname || '').toLowerCase().includes(q) ||
+            ((pat === null || pat === void 0 ? void 0 : pat.fname) || '').toLowerCase().includes(q) ||
+            ((pat === null || pat === void 0 ? void 0 : pat.lname) || '').toLowerCase().includes(q) ||
             (r.patname || '').toLowerCase().includes(q);
         const dateMatch = (!filterFrom || r.date >= filterFrom) && (!filterTo || r.date <= filterTo);
         const statusMatch = statusFilter === 'all' ||
@@ -2741,11 +2808,11 @@ function ReceiptPage({ receipts, saveReceipt, updateReceipt, deleteReceipt, pati
                                     React.createElement("div", { style: { fontWeight: 600 } },
                                         "HN ",
                                         r.hn),
-                                    React.createElement("div", { style: { fontSize: 12, color: 'var(--gray)' } },
-                                        pat?.prefix,
-                                        pat?.fname,
-                                        " ",
-                                        pat?.lname)),
+                                    React.createElement("div", { style: { fontSize: 12, color: 'var(--gray)' } }, pat === null || pat === void 0 ? void 0 :
+                                        pat.prefix, pat === null || pat === void 0 ? void 0 :
+                                        pat.fname,
+                                        " ", pat === null || pat === void 0 ? void 0 :
+                                        pat.lname)),
                                 React.createElement("td", { style: { padding: '8px 14px' } }, thaiDate(r.date)),
                                 React.createElement("td", { style: { padding: '8px 14px', textAlign: 'right', fontWeight: 700 } }, total.toLocaleString()),
                                 React.createElement("td", { style: { padding: '8px 14px' } }, r.paid || '-'),
@@ -2772,11 +2839,11 @@ function ReceiptPaymentPanel({ r, pat, updateReceipt, deleteReceipt, onDeleted, 
     const [items, setItems] = useState(r.items || []);
     const isPending = r.status !== 'ชำระแล้ว';
     const total = items.reduce((s, it) => s + it.qty * it.price, 0) - Number(discount);
-    const updItem = (i, k, v) => setItems(prev => prev.map((it, idx) => idx === i ? { ...it, [k]: k === 'qty' || k === 'price' ? Number(v) : v } : it));
+    const updItem = (i, k, v) => setItems(prev => prev.map((it, idx) => idx === i ? Object.assign(Object.assign({}, it), { [k]: k === 'qty' || k === 'price' ? Number(v) : v }) : it));
     const confirmPayment = async () => {
         if (!window.confirm(`ยืนยันรับชำระเงิน ${total.toLocaleString()} บาท\nวิธีชำระ: ${paid}\n\nกดยืนยันเพื่อปิดบิล`))
             return;
-        const updated = { ...r, items, discount: Number(discount), paid, status: 'ชำระแล้ว' };
+        const updated = Object.assign(Object.assign({}, r), { items, discount: Number(discount), paid, status: 'ชำระแล้ว' });
         await updateReceipt(updated);
         onUpdated(updated);
         alert('✅ รับชำระเงินเรียบร้อย — ปิดบิลแล้ว');
@@ -2814,7 +2881,7 @@ function ReceiptPaymentPanel({ r, pat, updateReceipt, deleteReceipt, onDeleted, 
                     " \u0E1A\u0E32\u0E17")),
             React.createElement("div", { style: { textAlign: 'right' } },
                 React.createElement("button", { className: "btn btn-accent", style: { fontSize: 14, padding: '10px 24px' }, onClick: confirmPayment }, "\u2705 \u0E22\u0E37\u0E19\u0E22\u0E31\u0E19\u0E23\u0E31\u0E1A\u0E0A\u0E33\u0E23\u0E30\u0E40\u0E07\u0E34\u0E19")))),
-        React.createElement(ReceiptDoc, { r: { ...r, items, discount: Number(discount), paid }, pat: pat, deleteReceipt: deleteReceipt, onDeleted: onDeleted })));
+        React.createElement(ReceiptDoc, { r: Object.assign(Object.assign({}, r), { items, discount: Number(discount), paid }), pat: pat, deleteReceipt: deleteReceipt, onDeleted: onDeleted })));
 }
 function ReceiptSummary({ receipts }) {
     const [period, setPeriod] = useState('month');
@@ -2908,11 +2975,11 @@ function ReceiptDoc({ r, pat, deleteReceipt, onDeleted }) {
         React.createElement("div", { style: { background: 'var(--gray-pale)', borderRadius: 6, padding: '8px 12px', marginBottom: 10, fontSize: 13 } },
             React.createElement("div", null,
                 React.createElement("b", null, "\u0E1C\u0E39\u0E49\u0E23\u0E31\u0E1A\u0E1A\u0E23\u0E34\u0E01\u0E32\u0E23:"),
-                " ",
-                pat?.prefix,
-                pat?.fname,
-                " ",
-                pat?.lname),
+                " ", pat === null || pat === void 0 ? void 0 :
+                pat.prefix, pat === null || pat === void 0 ? void 0 :
+                pat.fname,
+                " ", pat === null || pat === void 0 ? void 0 :
+                pat.lname),
             React.createElement("div", null,
                 React.createElement("b", null, "HN:"),
                 " ",
@@ -2989,25 +3056,26 @@ function ReceiptDoc({ r, pat, deleteReceipt, onDeleted }) {
                 } }, "\uD83D\uDDD1\uFE0F \u0E25\u0E1A\u0E43\u0E1A\u0E40\u0E2A\u0E23\u0E47\u0E08")))));
 }
 function ReceiptQuickModal({ data, onClose, getPatient, nextRID, receipts, saveReceipt, medicines, patchMedicineStock }) {
+    var _a, _b;
     const { pat, visit } = data;
     // Auto-build items from visit drugs + services
     const buildItems = () => {
-        const svcItems = (visit?.services || []).map(s => ({ desc: s.name, qty: s.qty || 1, unit: s.unit || 'ครั้ง', price: s.price, type: 'service' }));
-        const drugItems = (visit?.drugs || []).map(d => ({ desc: d.name, qty: d.qty, unit: d.unit, price: d.price, type: 'drug', medId: d.medId }));
+        const svcItems = ((visit === null || visit === void 0 ? void 0 : visit.services) || []).map(s => ({ desc: s.name, qty: s.qty || 1, unit: s.unit || 'ครั้ง', price: s.price, type: 'service' }));
+        const drugItems = ((visit === null || visit === void 0 ? void 0 : visit.drugs) || []).map(d => ({ desc: d.name, qty: d.qty, unit: d.unit, price: d.price, type: 'drug', medId: d.medId }));
         const all = [...svcItems, ...drugItems];
         return all.length > 0 ? all : [{ desc: 'ค่าตรวจรักษา', qty: 1, unit: 'ครั้ง', price: 300, type: 'service' }];
     };
     const [items, setItems] = useState(buildItems);
     const [discount, setDiscount] = useState(0);
     const addItem = () => setItems(prev => [...prev, { desc: '', qty: 1, unit: 'ครั้ง', price: 0, type: 'service' }]);
-    const updItem = (i, k, v) => setItems(prev => prev.map((it, idx) => idx === i ? { ...it, [k]: k === 'qty' || k === 'price' ? Number(v) : v } : it));
+    const updItem = (i, k, v) => setItems(prev => prev.map((it, idx) => idx === i ? Object.assign(Object.assign({}, it), { [k]: k === 'qty' || k === 'price' ? Number(v) : v }) : it));
     const rmItem = i => setItems(prev => prev.filter((_, idx) => idx !== i));
     const total = items.reduce((s, it) => s + it.qty * it.price, 0) - Number(discount);
     // NOTE: payment method & "paid" confirmation now happen ONLY on the Receipt page
     // at the front counter. This modal just issues the receipt record (pending payment)
     // and deducts drug stock since the medication has physically been dispensed.
     const save = async () => {
-        const r = { id: nextRID(), hn: pat.hn, visitId: visit?.id || '', patname: pat.prefix + pat.fname + ' ' + pat.lname, date: today(), items, discount: Number(discount), paid: '', status: 'รอชำระ' };
+        const r = { id: nextRID(), hn: pat.hn, visitId: (visit === null || visit === void 0 ? void 0 : visit.id) || '', patname: pat.prefix + pat.fname + ' ' + pat.lname, date: today(), items, discount: Number(discount), paid: '', status: 'รอชำระ' };
         await saveReceipt(r);
         for (const it of items) {
             if (it.type === 'drug') {
@@ -3045,7 +3113,7 @@ function ReceiptQuickModal({ data, onClose, getPatient, nextRID, receipts, saveR
                 visit.id,
                 " | ",
                 thaiDate(visit.date))),
-        (visit?.drugs?.length > 0 || visit?.services?.length > 0) && (React.createElement("div", { style: { display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap' } },
+        (((_a = visit === null || visit === void 0 ? void 0 : visit.drugs) === null || _a === void 0 ? void 0 : _a.length) > 0 || ((_b = visit === null || visit === void 0 ? void 0 : visit.services) === null || _b === void 0 ? void 0 : _b.length) > 0) && (React.createElement("div", { style: { display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap' } },
             svcTotal > 0 && React.createElement("div", { style: { background: '#e8f8f0', border: '1px solid #a8d5c8', borderRadius: 5, padding: '4px 10px', fontSize: 12, color: '#1e8449' } },
                 "\uD83C\uDFE5 \u0E04\u0E48\u0E32\u0E2B\u0E31\u0E15\u0E16\u0E01\u0E32\u0E23: ",
                 React.createElement("b", null,
@@ -3111,7 +3179,7 @@ function AppointPage({ appointments, saveAppointment, deleteAppointment, patient
     const todayCount = appointments.filter(a => a.date === today).length;
     const upCount = appointments.filter(a => a.date > today).length;
     const save = async (f) => {
-        const appt = f.id ? f : { ...f, id: nextAID() };
+        const appt = f.id ? f : Object.assign(Object.assign({}, f), { id: nextAID() });
         await saveAppointment(appt);
         setEdit(null);
         setNewForm(null);
@@ -3207,12 +3275,12 @@ function AppointPage({ appointments, saveAppointment, deleteAppointment, patient
                         React.createElement("td", { style: { padding: '8px 14px', fontSize: 12, color: 'var(--gray)' } }, a.note),
                         React.createElement("td", { style: { padding: '8px 14px', display: 'flex', gap: 4, flexWrap: 'wrap' } },
                             React.createElement("button", { className: "btn btn-print btn-sm", onClick: () => printAppointSlip(a) }, "\uD83D\uDDA8\uFE0F \u0E1E\u0E34\u0E21\u0E1E\u0E4C"),
-                            React.createElement("button", { className: "btn btn-outline btn-sm", onClick: () => setEdit({ ...a }) }, "\u0E41\u0E01\u0E49\u0E44\u0E02"),
+                            React.createElement("button", { className: "btn btn-outline btn-sm", onClick: () => setEdit(Object.assign({}, a)) }, "\u0E41\u0E01\u0E49\u0E44\u0E02"),
                             React.createElement("button", { className: "btn btn-danger btn-sm", onClick: () => del(a.id) }, "\u0E25\u0E1A"))))))))));
 }
 function AppointForm({ form, onSave, onCancel, patients }) {
-    const [f, setF] = useState({ ...form });
-    const up = (k, v) => setF(prev => ({ ...prev, [k]: v }));
+    const [f, setF] = useState(Object.assign({}, form));
+    const up = (k, v) => setF(prev => (Object.assign(Object.assign({}, prev), { [k]: v })));
     const searchPat = (hn) => { const p = patients.find(x => x.hn === hn); if (p)
         up('patname', p.prefix + p.fname + ' ' + p.lname); };
     return (React.createElement("div", { className: "card", style: { marginBottom: 14, background: 'var(--primary-pale)', border: '1.5px solid var(--primary-light)' } },
@@ -3246,9 +3314,9 @@ function AppointForm({ form, onSave, onCancel, patients }) {
 function AppointQuickModal({ data, onClose, getPatient, appointments, saveAppointment, nextAID }) {
     const { pat } = data;
     const [form, setForm] = useState({ hn: pat.hn, patname: pat.prefix + pat.fname + ' ' + pat.lname, date: '', time: '09:00', reason: '', status: 'นัดแล้ว', note: '' });
-    const f = (k, v) => setForm(prev => ({ ...prev, [k]: v }));
+    const f = (k, v) => setForm(prev => (Object.assign(Object.assign({}, prev), { [k]: v })));
     const slipId = 'appoint-slip-' + pat.hn;
-    const save = async () => { await saveAppointment({ ...form, id: nextAID() }); alert('บันทึกการนัดหมายเรียบร้อย'); onClose(); };
+    const save = async () => { await saveAppointment(Object.assign(Object.assign({}, form), { id: nextAID() })); alert('บันทึกการนัดหมายเรียบร้อย'); onClose(); };
     return (React.createElement(Modal, { title: "\uD83D\uDCC5 \u0E1A\u0E31\u0E19\u0E17\u0E36\u0E01\u0E01\u0E32\u0E23\u0E19\u0E31\u0E14\u0E2B\u0E21\u0E32\u0E22", onClose: onClose, width: 540 },
         React.createElement("div", { style: { background: 'var(--primary-pale)', borderRadius: 6, padding: '8px 12px', marginBottom: 12, fontSize: 13 } },
             React.createElement("b", null,
@@ -3343,7 +3411,7 @@ function AccountingPage({ receipts, today }) {
             setExpenses(prev => prev.map(e => e.id === f.id ? f : e));
         }
         else {
-            setExpenses(prev => [...prev, { ...f, id: nextXID() }]);
+            setExpenses(prev => [...prev, Object.assign(Object.assign({}, f), { id: nextXID() })]);
         }
         setAddForm(null);
         setEditForm(null);
@@ -3405,16 +3473,16 @@ function AccountingPage({ receipts, today }) {
                     React.createElement("div", { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(160px,1fr))', gap: 10 } },
                         React.createElement("div", null,
                             React.createElement("label", null, "\u0E27\u0E31\u0E19\u0E17\u0E35\u0E48"),
-                            React.createElement("input", { type: "date", value: ef.date, onChange: e => setEf(p => ({ ...p, date: e.target.value })) })),
+                            React.createElement("input", { type: "date", value: ef.date, onChange: e => setEf(p => (Object.assign(Object.assign({}, p), { date: e.target.value }))) })),
                         React.createElement("div", null,
                             React.createElement("label", null, "\u0E2B\u0E21\u0E27\u0E14\u0E2B\u0E21\u0E39\u0E48"),
-                            React.createElement("select", { value: ef.category, onChange: e => setEf(p => ({ ...p, category: e.target.value })) }, EXP_CATS.map(c => React.createElement("option", { key: c }, c)))),
+                            React.createElement("select", { value: ef.category, onChange: e => setEf(p => (Object.assign(Object.assign({}, p), { category: e.target.value }))) }, EXP_CATS.map(c => React.createElement("option", { key: c }, c)))),
                         React.createElement("div", { style: { gridColumn: 'span 2' } },
                             React.createElement("label", null, "\u0E23\u0E32\u0E22\u0E25\u0E30\u0E40\u0E2D\u0E35\u0E22\u0E14"),
-                            React.createElement("input", { value: ef.desc, onChange: e => setEf(p => ({ ...p, desc: e.target.value })) })),
+                            React.createElement("input", { value: ef.desc, onChange: e => setEf(p => (Object.assign(Object.assign({}, p), { desc: e.target.value }))) })),
                         React.createElement("div", null,
                             React.createElement("label", null, "\u0E08\u0E33\u0E19\u0E27\u0E19\u0E40\u0E07\u0E34\u0E19 (\u0E1A\u0E32\u0E17)"),
-                            React.createElement("input", { type: "number", value: ef.amount, onChange: e => setEf(p => ({ ...p, amount: Number(e.target.value) })) }))),
+                            React.createElement("input", { type: "number", value: ef.amount, onChange: e => setEf(p => (Object.assign(Object.assign({}, p), { amount: Number(e.target.value) }))) }))),
                     React.createElement("div", { style: { textAlign: 'right', marginTop: 10, display: 'flex', gap: 8, justifyContent: 'flex-end' } },
                         React.createElement("button", { className: "btn btn-gray btn-sm", onClick: () => { setAddForm(null); setEditForm(null); } }, "\u0E22\u0E01\u0E40\u0E25\u0E34\u0E01"),
                         React.createElement("button", { className: "btn btn-sm", style: { background: 'var(--warning)', color: '#fff' }, onClick: () => saveExp(ef) }, "\uD83D\uDCBE \u0E1A\u0E31\u0E19\u0E17\u0E36\u0E01"))));
@@ -3468,7 +3536,7 @@ function AccountingPage({ receipts, today }) {
                             showType !== 'expense' && React.createElement("td", { style: { padding: '8px 12px', textAlign: 'right', fontWeight: row.income > 0 ? 700 : 400, color: row.income > 0 ? 'var(--accent)' : '#ccc' } }, row.income > 0 ? row.income.toLocaleString() : '-'),
                             showType !== 'income' && React.createElement("td", { style: { padding: '8px 12px', textAlign: 'right', fontWeight: row.expense > 0 ? 700 : 400, color: row.expense > 0 ? 'var(--danger)' : '#ccc' } }, row.expense > 0 ? row.expense.toLocaleString() : '-'),
                             React.createElement("td", { style: { padding: '8px 8px' }, className: "no-print" }, row.type === 'expense' && React.createElement("div", { style: { display: 'flex', gap: 3 } },
-                                React.createElement("button", { className: "btn btn-outline btn-sm", style: { padding: '3px 8px', fontSize: 11 }, onClick: () => setEditForm({ ...row.expObj }) }, "\u0E41\u0E01\u0E49"),
+                                React.createElement("button", { className: "btn btn-outline btn-sm", style: { padding: '3px 8px', fontSize: 11 }, onClick: () => setEditForm(Object.assign({}, row.expObj)) }, "\u0E41\u0E01\u0E49"),
                                 React.createElement("button", { className: "btn btn-danger btn-sm", style: { padding: '3px 8px', fontSize: 11 }, onClick: () => delExp(row.id) }, "\u0E25\u0E1A"))))))),
                     React.createElement("tfoot", null,
                         React.createElement("tr", { style: { background: '#1a5276', color: '#fff', fontWeight: 700, fontSize: 13 } },
@@ -3497,7 +3565,7 @@ function PharmacyPage({ medicines, saveMedicine, deleteMedicine, receipts, treat
     const [svcAdding, setSvcAdding] = useState(false);
     const SVC_CATS = ['ค่าตรวจ', 'ค่าหัตถการ', 'ค่าตรวจพิเศษ', 'เอกสาร', 'อื่นๆ'];
     const saveService = async (f) => {
-        const svc = f.id ? f : { ...f, id: 'S' + pad((treatmentServices || []).length + 1, 3), active: true };
+        const svc = f.id ? f : Object.assign(Object.assign({}, f), { id: 'S' + pad((treatmentServices || []).length + 1, 3), active: true });
         await saveTreatmentService(svc);
         setSvcEdit(null);
         setSvcAdding(false);
@@ -3507,7 +3575,7 @@ function PharmacyPage({ medicines, saveMedicine, deleteMedicine, receipts, treat
     const toggleActive = async (id) => {
         const svc = (treatmentServices || []).find(s => s.id === id);
         if (svc)
-            await saveTreatmentService({ ...svc, active: !svc.active });
+            await saveTreatmentService(Object.assign(Object.assign({}, svc), { active: !svc.active }));
     };
     const cats = ['ทั้งหมด', ...new Set(medicines.map(m => m.category))];
     const filtered = medicines.filter(m => {
@@ -3519,7 +3587,7 @@ function PharmacyPage({ medicines, saveMedicine, deleteMedicine, receipts, treat
     const lowStock = medicines.filter(m => m.stock <= m.minstock);
     const expireSoon = medicines.filter(m => (new Date(m.expire) - new Date()) / (1000 * 60 * 60 * 24) < 90);
     const saveMed = async (f) => {
-        const med = f.id ? f : { ...f, id: 'M' + pad(medicines.length + 1, 3) };
+        const med = f.id ? f : Object.assign(Object.assign({}, f), { id: 'M' + pad(medicines.length + 1, 3) });
         await saveMedicine(med);
         setEdit(null);
         setAdding(false);
@@ -3605,7 +3673,7 @@ function PharmacyPage({ medicines, saveMedicine, deleteMedicine, receipts, treat
                                     thaiDate(m.expire),
                                     isExp && React.createElement("span", { style: { fontSize: 10 } }, " \u26A0\uFE0F")),
                                 React.createElement("td", { style: { padding: '7px 10px', display: 'flex', gap: 4 } },
-                                    React.createElement("button", { className: "btn btn-outline btn-sm", onClick: () => setEdit({ ...m }) }, "\u0E41\u0E01\u0E49\u0E44\u0E02"),
+                                    React.createElement("button", { className: "btn btn-outline btn-sm", onClick: () => setEdit(Object.assign({}, m)) }, "\u0E41\u0E01\u0E49\u0E44\u0E02"),
                                     React.createElement("button", { className: "btn btn-danger btn-sm", onClick: () => delMed(m.id) }, "\u0E25\u0E1A"))));
                         })))))),
         tab === 'services' && (React.createElement("div", null,
@@ -3640,7 +3708,7 @@ function PharmacyPage({ medicines, saveMedicine, deleteMedicine, receipts, treat
                             React.createElement("td", { style: { padding: '8px 12px', textAlign: 'center' } },
                                 React.createElement("button", { onClick: () => toggleActive(s.id), style: { padding: '3px 10px', border: 'none', borderRadius: 12, cursor: 'pointer', fontSize: 11, fontWeight: 700, fontFamily: 'inherit', background: s.active ? '#d5f5e3' : '#eee', color: s.active ? '#1e8449' : '#999', transition: 'all 0.15s' } }, s.active ? '✅ เปิดใช้' : '⏸ ปิดใช้')),
                             React.createElement("td", { style: { padding: '8px 12px', display: 'flex', gap: 4 } },
-                                React.createElement("button", { className: "btn btn-outline btn-sm", onClick: () => setSvcEdit({ ...s }) }, "\u270F\uFE0F \u0E41\u0E01\u0E49\u0E44\u0E02"),
+                                React.createElement("button", { className: "btn btn-outline btn-sm", onClick: () => setSvcEdit(Object.assign({}, s)) }, "\u270F\uFE0F \u0E41\u0E01\u0E49\u0E44\u0E02"),
                                 React.createElement("button", { className: "btn btn-danger btn-sm", onClick: () => delService(s.id) }, "\u0E25\u0E1A")))))))))),
         tab === 'report' && (React.createElement("div", { className: "card" },
             React.createElement("div", { style: { fontWeight: 700, fontSize: 14, color: 'var(--primary)', marginBottom: 12 } }, "\uD83D\uDCCA \u0E2A\u0E23\u0E38\u0E1B\u0E01\u0E32\u0E23\u0E43\u0E0A\u0E49\u0E22\u0E32 (\u0E17\u0E31\u0E49\u0E07\u0E2B\u0E21\u0E14)"),
@@ -3661,14 +3729,14 @@ function PharmacyPage({ medicines, saveMedicine, deleteMedicine, receipts, treat
                             React.createElement("td", { style: { padding: '8px 14px', textAlign: 'center' } }, c.qty),
                             React.createElement("td", { style: { padding: '8px 14px', textAlign: 'right', color: 'var(--accent)', fontWeight: 600 } }, c.revenue.toLocaleString()),
                             React.createElement("td", { style: { padding: '8px 14px', textAlign: 'center' } },
-                                med?.stock || 0,
+                                (med === null || med === void 0 ? void 0 : med.stock) || 0,
                                 " ",
-                                med?.unit || '')));
+                                (med === null || med === void 0 ? void 0 : med.unit) || '')));
                     })))))));
 }
 function MedForm({ form, onSave, onCancel, isNew }) {
-    const [f, setF] = useState({ ...form });
-    const up = (k, v) => setF(prev => ({ ...prev, [k]: k === 'stock' || k === 'price' || k === 'cost' || k === 'minstock' ? Number(v) : v }));
+    const [f, setF] = useState(Object.assign({}, form));
+    const up = (k, v) => setF(prev => (Object.assign(Object.assign({}, prev), { [k]: k === 'stock' || k === 'price' || k === 'cost' || k === 'minstock' ? Number(v) : v })));
     const cats = ['ยาแก้ปวด/ลดไข้', 'ยาปฏิชีวนะ', 'ยาแก้แพ้', 'ยาระบบทางเดินอาหาร', 'ยาความดัน', 'ยาเบาหวาน', 'ยาหัวใจ', 'วิตามิน/อาหารเสริม', 'เวชภัณฑ์/วัสดุสิ้นเปลือง', 'อื่นๆ'];
     return (React.createElement("div", { className: "card", style: { marginBottom: 12, background: 'var(--accent-pale)', border: '1.5px solid var(--accent)' } },
         React.createElement("div", { style: { fontWeight: 700, color: 'var(--accent)', marginBottom: 10 } }, isNew ? '+ เพิ่มรายการยาใหม่' : '✏️ แก้ไขข้อมูลยา'),
@@ -3702,8 +3770,8 @@ function MedForm({ form, onSave, onCancel, isNew }) {
             React.createElement("button", { className: "btn btn-accent btn-sm", onClick: () => onSave(f) }, "\uD83D\uDCBE \u0E1A\u0E31\u0E19\u0E17\u0E36\u0E01"))));
 }
 function ServiceForm({ form, onSave, onCancel, isNew, cats }) {
-    const [f, setF] = useState({ ...form });
-    const up = (k, v) => setF(prev => ({ ...prev, [k]: k === 'price' ? Number(v) : v }));
+    const [f, setF] = useState(Object.assign({}, form));
+    const up = (k, v) => setF(prev => (Object.assign(Object.assign({}, prev), { [k]: k === 'price' ? Number(v) : v })));
     return (React.createElement("div", { className: "card", style: { marginBottom: 14, background: '#e8f8f0', border: '2px solid #1e8449' } },
         React.createElement("div", { style: { fontWeight: 700, color: '#1e8449', marginBottom: 12, fontSize: 14 } }, isNew ? '➕ เพิ่มรายการหัตถการ / ค่าบริการใหม่' : '✏️ แก้ไขรายการหัตถการ'),
         React.createElement("div", { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(180px,1fr))', gap: 12 } },
