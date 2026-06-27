@@ -442,6 +442,7 @@ function ClinicDashboard() {
   const [dbReady, setDbReady] = useState(false);
   const [dbError, setDbError] = useState(null);
   const [rlsError, setRlsError] = useState(false);
+  const [saveError, setSaveError] = useState(false);
   const [loading, setLoading] = useState(true);
 
   // ── App state — starts from SAMPLE data, gets overwritten by DB on load
@@ -523,26 +524,33 @@ function ClinicDashboard() {
   };
 
   const saveVisit = async (v) => {
-    // Track whether this visit already existed in DB before we update local state
-    let existedInDb = false;
+    // Check BEFORE setState — setState updater runs async so can't rely on closure var
+    const existedInDb = visits.some(x => x.id === v.id);
     setVisits(prev => {
       const exists = prev.find(x => x.id === v.id);
-      existedInDb = !!exists;
       return exists ? prev.map(x => x.id === v.id ? v : x) : [...prev, v];
     });
     const dbRow = toDbVisit(v);
     let result;
     if (existedInDb) {
       result = await supa.patch('visits', 'id', v.id, dbRow);
+      if (result === null) {
+        console.warn('saveVisit: PATCH failed, trying INSERT');
+        result = await supa.insert('visits', dbRow);
+      }
     } else {
       result = await supa.insert('visits', dbRow);
       if (result === null) {
-        console.warn('saveVisit: insert failed, trying patch as fallback');
+        console.warn('saveVisit: INSERT failed, trying PATCH');
         result = await supa.patch('visits', 'id', v.id, dbRow);
       }
     }
     if (result === 'RLS_ERROR') { setRlsError(true); return null; }
-    return result; // null = DB error
+    if (result === null) {
+      console.error('saveVisit: all DB write attempts failed for visit', v.id);
+      setSaveError(true);
+    }
+    return result;
   };
 
   const saveReceipt = async (r) => {
@@ -704,6 +712,16 @@ END $$;`}</pre>
               </button>
             </div>
           </div>
+        </div>
+      )}
+      {/* ── Save Error Banner */}
+      {saveError&&(
+        <div style={{position:'fixed',bottom:0,left:0,right:0,background:'#c0392b',color:'#fff',padding:'14px 20px',zIndex:9997,display:'flex',alignItems:'center',justifyContent:'space-between',fontSize:14,boxShadow:'0 -4px 20px rgba(0,0,0,0.3)'}}>
+          <div>
+            <b>⚠️ ไม่สามารถบันทึกลงฐานข้อมูลได้</b>
+            <span style={{marginLeft:12,opacity:0.9}}>ข้อมูลอยู่ในหน้าจอ แต่จะหายเมื่อรีเฟรช — กรุณาตรวจสอบ Console (F12)</span>
+          </div>
+          <button onClick={()=>setSaveError(false)} style={{background:'rgba(255,255,255,0.2)',border:'none',color:'#fff',borderRadius:6,padding:'6px 14px',cursor:'pointer',fontSize:13}}>ปิด</button>
         </div>
       )}
       {/* HEADER */}

@@ -430,6 +430,7 @@ function ClinicDashboard() {
     const [dbReady, setDbReady] = useState(false);
     const [dbError, setDbError] = useState(null);
     const [rlsError, setRlsError] = useState(false);
+    const [saveError, setSaveError] = useState(false);
     const [loading, setLoading] = useState(true);
     // ── App state — starts from SAMPLE data, gets overwritten by DB on load
     const [patients, setPatients] = useState(SAMPLE_PATIENTS);
@@ -522,29 +523,35 @@ function ClinicDashboard() {
         await supa.upsert('patients', p);
     };
     const saveVisit = async (v) => {
-        // Track whether this visit already existed in DB before we update local state
-        let existedInDb = false;
+        // Check BEFORE setState — setState updater runs async so can't rely on closure var
+        const existedInDb = visits.some(x => x.id === v.id);
         setVisits(prev => {
             const exists = prev.find(x => x.id === v.id);
-            existedInDb = !!exists;
             return exists ? prev.map(x => x.id === v.id ? v : x) : [...prev, v];
         });
         const dbRow = toDbVisit(v);
         let result;
         if (existedInDb) {
-            // Record already exists in DB — use PATCH to update it
+            // Update existing record
             result = await supa.patch('visits', 'id', v.id, dbRow);
+            if (result === null) {
+                console.warn('saveVisit: PATCH failed, trying INSERT');
+                result = await supa.insert('visits', dbRow);
+            }
         } else {
-            // New record — INSERT, with fallback to PATCH if already exists (race condition)
+            // New record — INSERT first, fallback to PATCH on conflict
             result = await supa.insert('visits', dbRow);
             if (result === null) {
-                // INSERT failed — try PATCH as fallback (visit may have been saved before)
-                console.warn('saveVisit: insert failed, trying patch as fallback');
+                console.warn('saveVisit: INSERT failed, trying PATCH');
                 result = await supa.patch('visits', 'id', v.id, dbRow);
             }
         }
         if (result === 'RLS_ERROR') { setRlsError(true); return null; }
-        return result; // null = DB error
+        if (result === null) {
+            console.error('saveVisit: all DB write attempts failed for visit', v.id);
+            setSaveError(true);
+        }
+        return result;
     };
     const saveReceipt = async (r) => {
         setReceipts(prev => [...prev, r]);
@@ -668,6 +675,11 @@ function ClinicDashboard() {
                         onClick: () => setRlsError(false),
                         style: { flex: 1, background: '#eee', color: '#333', border: 'none', borderRadius: 7, padding: '10px 0', fontSize: 14, cursor: 'pointer' }
                     }, "\u0E1B\u0E34\u0E14 (\u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25\u0E16\u0E39\u0E01\u0E1A\u0E31\u0E19\u0E17\u0E36\u0E01\u0E43\u0E19\u0E2B\u0E19\u0E49\u0E32\u0E08\u0E2D\u0E41\u0E25\u0E49\u0E27)")))),
+        saveError && React.createElement("div", { style: { position: 'fixed', bottom: 0, left: 0, right: 0, background: '#c0392b', color: '#fff', padding: '14px 20px', zIndex: 9997, display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 14, boxShadow: '0 -4px 20px rgba(0,0,0,0.3)' } },
+            React.createElement("div", null,
+                React.createElement("b", null, "⚠️ ไม่สามารถบันทึกลงฐานข้อมูลได้"),
+                React.createElement("span", { style: { marginLeft: 12, opacity: 0.9 } }, "ข้อมูลอยู่ในหน้าจอ แต่จะหายเมื่อรีเฟรช — กรุณาตรวจสอบ Console (F12)")),
+            React.createElement("button", { onClick: () => setSaveError(false), style: { background: 'rgba(255,255,255,0.2)', border: 'none', color: '#fff', borderRadius: 6, padding: '6px 14px', cursor: 'pointer', fontSize: 13 } }, "ปิด")),
         React.createElement("div", { style: { background: `linear-gradient(135deg,#1a5276,#2e86c1)`, color: '#fff', padding: '0 0 0 0', boxShadow: '0 2px 12px rgba(26,82,118,0.25)' } },
             React.createElement("div", { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 24px 0' } },
                 React.createElement("div", { style: { display: 'flex', alignItems: 'center', gap: 14 } },
@@ -1639,7 +1651,8 @@ function ExaminePage({ patients, visits, saveVisit, nextVID, getPatient, getVisi
         const completed = { ...vform, status: 'ตรวจเสร็จ' };
         const vResult = await saveVisit(completed);
         if (vResult === null) {
-            console.error('issueReceiptOnly: visit save failed');
+            console.error('issueReceiptOnly: visit status save failed');
+            // rlsError modal shown by saveVisit if it is a permissions issue
         }
         setVform(completed);
         setSaved(true);
