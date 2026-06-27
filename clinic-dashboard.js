@@ -189,9 +189,9 @@ const toDbVisit = (v) => ({
     dx: v.dx || '', tx: v.tx || '', note: v.note || '', nurse: v.nurse || '',
     bp: v.bp || '', pr: v.pr || '', rr: v.rr || '', temp: v.temp || '', o2: v.o2 || '',
     weight: v.weight || '', height: v.height || '',
-    // Serialize arrays as JSON strings for compatibility with both text and jsonb columns
-    drugs: v.drugs && v.drugs.length > 0 ? JSON.stringify(v.drugs) : '[]',
-    services: v.services && v.services.length > 0 ? JSON.stringify(v.services) : '[]',
+    // Send as native arrays — Supabase jsonb columns require this, not JSON strings
+    drugs: Array.isArray(v.drugs) ? v.drugs : [],
+    services: Array.isArray(v.services) ? v.services : [],
     // These columns may not exist in older DB schemas — supa.upsert will auto-strip them on error
     status: v.status || 'รอตรวจ',
     queue_no: v.queueNo || '',
