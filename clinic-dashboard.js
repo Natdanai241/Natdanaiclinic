@@ -34,7 +34,9 @@ const supa = {
         });
         if (!r.ok) {
             const errText = await r.text();
-            console.error(`upsert ${table}:`, errText);
+            console.error(`upsert ${table} [HTTP ${r.status}]:`, errText);
+            let errObj = null;
+            try { errObj = JSON.parse(errText); } catch (_) {}
             // Auto-detect unknown column from Postgres error (code 42703)
             // Pattern: column "xyz" of relation "visits" does not exist
             const colMatch = errText.match(/column "([^"]+)" of relation/);
@@ -49,6 +51,10 @@ const supa = {
                 // Retry without the bad column
                 return this.upsert(table, data, _depth + 1);
             }
+            // Surface a human-readable error for diagnosis
+            const pgCode = errObj?.code || '';
+            const pgMsg  = errObj?.message || errText;
+            console.error(`upsert ${table} pg_error: code=${pgCode} msg=${pgMsg}`);
             return null;
         }
         return r.json();
@@ -98,9 +104,10 @@ const toDbVisit = (v) => ({
     dx: v.dx || '', tx: v.tx || '', note: v.note || '', nurse: v.nurse || '',
     bp: v.bp || '', pr: v.pr || '', rr: v.rr || '', temp: v.temp || '', o2: v.o2 || '',
     weight: v.weight || '', height: v.height || '',
-    // Serialize arrays as JSON strings for compatibility with both text and jsonb columns
-    drugs: v.drugs && v.drugs.length > 0 ? JSON.stringify(v.drugs) : '[]',
-    services: v.services && v.services.length > 0 ? JSON.stringify(v.services) : '[]',
+    // Send as native arrays — Supabase PostgREST handles jsonb columns natively.
+    // fromDbVisit already handles both array and string for backward compatibility.
+    drugs: Array.isArray(v.drugs) ? v.drugs : [],
+    services: Array.isArray(v.services) ? v.services : [],
     // These columns may not exist in older DB schemas — supa.upsert will auto-strip them on error
     status: v.status || 'รอตรวจ',
     queue_no: v.queueNo || '',
@@ -1471,7 +1478,7 @@ function ExaminePage({ patients, visits, saveVisit, nextVID, getPatient, getVisi
         const result = await saveVisit(completed);
         if (result === null) {
             console.error('save: DB write failed after retries');
-            alert('⚠️ บันทึกสำเร็จในหน้าจอ แต่ไม่สามารถ sync ฐานข้อมูลได้\nกรุณาตรวจสอบ console และการเชื่อมต่อ Supabase');
+            alert('⚠️ บันทึกสำเร็จในหน้าจอแล้ว แต่ไม่สามารถ sync ฐานข้อมูลได้\nข้อมูลการตรวจถูกเก็บในหน้าจอนี้แล้ว\n\nกรุณาตรวจสอบ Console (F12) สำหรับรายละเอียด error\nหากปัญหายังอยู่ให้ลองกด "บันทึกการตรวจ" อีกครั้ง');
         }
         else {
             alert('✅ บันทึกการตรวจเรียบร้อย\nย้ายผู้ป่วยไปที่ "ตรวจเสร็จแล้ว" แล้ว');
@@ -1510,7 +1517,7 @@ function ExaminePage({ patients, visits, saveVisit, nextVID, getPatient, getVisi
         const completed = { ...vform, status: 'ตรวจเสร็จ' };
         const vResult = await saveVisit(completed);
         if (vResult === null) {
-            alert('⚠️ ออกใบเสร็จสำเร็จ แต่เกิดข้อผิดพลาดในการบันทึกสถานะ Visit\nกรุณาตรวจสอบการเชื่อมต่อและลองบันทึกอีกครั้ง');
+            alert('⚠️ ออกใบเสร็จสำเร็จแล้ว แต่ไม่สามารถบันทึกสถานะ Visit ลงฐานข้อมูลได้\nกรุณาตรวจสอบ Console (F12) สำหรับรายละเอียด\nแล้วกด "บันทึกการตรวจ" เพื่อ sync ข้อมูลอีกครั้ง');
         }
         setVform(completed);
         setSaved(true);
