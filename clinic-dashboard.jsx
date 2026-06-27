@@ -9,82 +9,149 @@ const supa = {
   // Cache of columns confirmed missing per table — avoids repeated 400 errors
   _missingCols: {},
 
-  // ── Generic fetch all rows from a table
-  async getAll(table) {
-    const r = await fetch(`${SUPA_URL}/rest/v1/${table}?order=created_at.asc`, { headers: this.headers });
-    if (!r.ok) { console.error(`getAll ${table}:`, await r.text()); return null; }
-    return r.json();
+  // ── Strip known-bad columns from a row object
+  _strip(table, row) {
+    const known = this._missingCols[table] || [];
+    const out = {...row};
+    known.forEach(col => delete out[col]);
+    return out;
   },
 
-  // ── Upsert with automatic column-stripping on schema mismatch
+  // ── Learn a bad column and cache it
+  _learnBadCol(table, errText) {
+    const colMatch = errText.match(/column "([^"]+)" of relation/);
+    if (!colMatch) return null;
+    const badCol = colMatch[1];
+    if (!this._missingCols[table]) this._missingCols[table] = [];
+    if (!this._missingCols[table].includes(badCol)) {
+      this._missingCols[table].push(badCol);
+      console.warn(`Auto-skipping missing column "${badCol}" in "${table}"`);
+    }
+    return badCol;
+  },
+
+  // ── Generic fetch all rows from a table
+  async getAll(table) {
+    try {
+      const r = await fetch(`${SUPA_URL}/rest/v1/${table}?order=created_at.asc`, { headers: this.headers });
+      if (!r.ok) { console.error(`getAll ${table}:`, await r.text()); return null; }
+      return r.json();
+    } catch(e) { console.error(`getAll ${table} network error:`, e); return null; }
+  },
+
+  // ── INSERT a single row (POST), retry on column mismatch up to 10 times
+  async insert(table, data, _depth) {
+    _depth = _depth || 0;
+    const body = this._strip(table, data);
+    try {
+      const r = await fetch(`${SUPA_URL}/rest/v1/${table}`, {
+        method: "POST",
+        headers: { ...this.headers, "Prefer": "return=representation" },
+        body: JSON.stringify(body),
+      });
+      if (!r.ok) {
+        const errText = await r.text();
+        console.error(`insert ${table} [HTTP ${r.status}]:`, errText);
+        if (_depth < 10 && this._learnBadCol(table, errText)) {
+          return this.insert(table, data, _depth + 1);
+        }
+        return null;
+      }
+      return r.json();
+    } catch(e) { console.error(`insert ${table} network error:`, e); return null; }
+  },
+
+  // ── PATCH (update) by primary key, retry on column mismatch
+  async patch(table, pkCol, pkVal, data, _depth) {
+    _depth = _depth || 0;
+    const body = this._strip(table, data);
+    try {
+      const r = await fetch(`${SUPA_URL}/rest/v1/${table}?${pkCol}=eq.${pkVal}`, {
+        method: "PATCH",
+        headers: { ...this.headers, "Prefer": "return=representation" },
+        body: JSON.stringify(body),
+      });
+      if (!r.ok) {
+        const errText = await r.text();
+        console.error(`patch ${table} [HTTP ${r.status}]:`, errText);
+        if (_depth < 10 && this._learnBadCol(table, errText)) {
+          return this.patch(table, pkCol, pkVal, data, _depth + 1);
+        }
+        return null;
+      }
+      return r.json();
+    } catch(e) { console.error(`patch ${table} network error:`, e); return null; }
+  },
+
+  // ── Upsert: try INSERT first; if 409 conflict → PATCH instead
+  // Also handles bulk arrays (for seed data) via old merge-duplicates method
   async upsert(table, data, _depth) {
     _depth = _depth || 0;
-    const rows = Array.isArray(data) ? data : [data];
-    // Strip columns we already know are missing from this table
-    const known = this._missingCols[table] || [];
-    const body = rows.map(row => {
-      const out = {...row};
-      known.forEach(col => delete out[col]);
-      return out;
-    });
+    // Bulk array path — use merge-duplicates as before
+    if (Array.isArray(data)) {
+      const body = data.map(row => this._strip(table, row));
+      try {
+        const r = await fetch(`${SUPA_URL}/rest/v1/${table}`, {
+          method: "POST",
+          headers: { ...this.headers, "Prefer": "resolution=merge-duplicates,return=representation" },
+          body: JSON.stringify(body),
+        });
+        if (!r.ok) {
+          const errText = await r.text();
+          console.error(`upsert[] ${table} [HTTP ${r.status}]:`, errText);
+          if (_depth < 10 && this._learnBadCol(table, errText)) {
+            return this.upsert(table, data, _depth + 1);
+          }
+          return null;
+        }
+        return r.json();
+      } catch(e) { console.error(`upsert[] ${table} network:`, e); return null; }
+    }
 
-    const r = await fetch(`${SUPA_URL}/rest/v1/${table}`, {
-      method: "POST",
-      headers: { ...this.headers, "Prefer": "resolution=merge-duplicates,return=representation" },
-      body: JSON.stringify(body),
-    });
-
-    if (!r.ok) {
+    // Single-row path: INSERT → on conflict (409 / 23505) → PATCH
+    const body = this._strip(table, data);
+    try {
+      const r = await fetch(`${SUPA_URL}/rest/v1/${table}`, {
+        method: "POST",
+        headers: { ...this.headers, "Prefer": "return=representation" },
+        body: JSON.stringify(body),
+      });
+      if (r.ok) return r.json();
       const errText = await r.text();
       console.error(`upsert ${table} [HTTP ${r.status}]:`, errText);
 
-      let errObj = null;
-      try { errObj = JSON.parse(errText); } catch (_) {}
-
-      // Auto-detect unknown column from Postgres error (code 42703)
-      // Pattern: column "xyz" of relation "visits" does not exist
-      const colMatch = errText.match(/column "([^"]+)" of relation/);
-      if (colMatch && _depth < 10) {
-        const badCol = colMatch[1];
-        if (!this._missingCols[table]) this._missingCols[table] = [];
-        if (!this._missingCols[table].includes(badCol)) {
-          this._missingCols[table].push(badCol);
-          console.warn(`Auto-skipping missing column "${badCol}" in table "${table}"`);
-        }
-        // Retry without the bad column
+      // Unknown column → strip and retry insert
+      if (_depth < 10 && this._learnBadCol(table, errText)) {
         return this.upsert(table, data, _depth + 1);
       }
 
-      // Surface a human-readable error for diagnosis
+      // Duplicate key (23505) or HTTP 409 → fall back to PATCH
+      let errObj = null;
+      try { errObj = JSON.parse(errText); } catch(_) {}
       const pgCode = errObj?.code || '';
-      const pgMsg  = errObj?.message || errText;
-      console.error(`upsert ${table} pg_error: code=${pgCode} msg=${pgMsg}`);
+      if (r.status === 409 || pgCode === '23505') {
+        console.warn(`upsert ${table}: conflict on insert, falling back to PATCH`);
+        // Find primary key — try common names
+        const pkCol = 'id';
+        const pkVal = data[pkCol];
+        if (pkVal !== undefined) {
+          return this.patch(table, pkCol, pkVal, data);
+        }
+      }
+      console.error(`upsert ${table} pg_error: code=${pgCode} msg=${errObj?.message || errText}`);
       return null;
-    }
-    return r.json();
+    } catch(e) { console.error(`upsert ${table} network:`, e); return null; }
   },
 
   // ── Delete by primary key
   async delete(table, pkCol, pkVal) {
-    const r = await fetch(`${SUPA_URL}/rest/v1/${table}?${pkCol}=eq.${pkVal}`, {
-      method: "DELETE", headers: this.headers,
-    });
-    if (!r.ok) { console.error(`delete ${table}:`, await r.text()); return false; }
-    return true;
-  },
-
-  // ── Patch (partial update) by pk — also strips known-missing columns
-  async patch(table, pkCol, pkVal, data) {
-    const known = this._missingCols[table] || [];
-    const safe = {...data};
-    known.forEach(col => delete safe[col]);
-    const r = await fetch(`${SUPA_URL}/rest/v1/${table}?${pkCol}=eq.${pkVal}`, {
-      method: "PATCH",
-      headers: { ...this.headers, "Prefer": "return=representation" },
-      body: JSON.stringify(safe),
-    });
-    if (!r.ok) { console.error(`patch ${table}:`, await r.text()); return null; }
-    return r.json();
+    try {
+      const r = await fetch(`${SUPA_URL}/rest/v1/${table}?${pkCol}=eq.${pkVal}`, {
+        method: "DELETE", headers: this.headers,
+      });
+      if (!r.ok) { console.error(`delete ${table}:`, await r.text()); return false; }
+      return true;
+    } catch(e) { console.error(`delete ${table} network:`, e); return false; }
   },
 };
 
@@ -430,12 +497,28 @@ function ClinicDashboard() {
   };
 
   const saveVisit = async (v) => {
+    // Track whether this visit already existed in DB before we update local state
+    let existedInDb = false;
     setVisits(prev => {
       const exists = prev.find(x => x.id === v.id);
+      existedInDb = !!exists;
       return exists ? prev.map(x => x.id === v.id ? v : x) : [...prev, v];
     });
-    const result = await supa.upsert('visits', toDbVisit(v));
-    return result; // null = DB error, array = success
+    const dbRow = toDbVisit(v);
+    let result;
+    if (existedInDb) {
+      // Record already exists in DB — use PATCH to update it
+      result = await supa.patch('visits', 'id', v.id, dbRow);
+    } else {
+      // New record — INSERT, with fallback to PATCH if already exists (race condition)
+      result = await supa.insert('visits', dbRow);
+      if (result === null) {
+        // INSERT failed — try PATCH as fallback (visit may have been saved before)
+        console.warn('saveVisit: insert failed, trying patch as fallback');
+        result = await supa.patch('visits', 'id', v.id, dbRow);
+      }
+    }
+    return result; // null = DB error
   };
 
   const saveReceipt = async (r) => {
