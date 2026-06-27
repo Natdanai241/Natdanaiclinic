@@ -640,39 +640,117 @@ function DashboardPage({ todayVisits, todayAppoints, lowStock, monthRevenue, pat
 }
 // ===================== QUEUE TICKET PRINT =====================
 function printQueueTicket(qNum, pat, cc) {
-    const win = window.open('', '_blank', 'width=320,height=420');
     const now = new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
-    win.document.write(`<!DOCTYPE html><html><head><title>บัตรคิว</title>
+    // Open a small window sized to ~80mm ticket
+    const win = window.open('', '_blank', 'width=340,height=560,menubar=no,toolbar=no,location=no,status=no');
+    win.document.write(`<!DOCTYPE html><html><head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>บัตรคิว ${qNum}</title>
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700;800&display=swap');
-    *{box-sizing:border-box;margin:0;padding:0;}
-    body{font-family:'Sarabun',sans-serif;background:#fff;padding:6px;width:80mm;}
-    .ticket{border:2px dashed #1a5276;border-radius:8px;padding:10px 12px;text-align:center;}
-    .clinic{font-size:10px;font-weight:700;color:#1a5276;border-bottom:1px solid #ddd;padding-bottom:5px;margin-bottom:8px;}
-    .qlabel{font-size:10px;color:#888;margin-bottom:2px;letter-spacing:2px;}
-    .qnum{font-size:56px;font-weight:800;color:#1a5276;line-height:1;margin:6px 0;}
-    .hn{font-size:12px;font-weight:700;color:#555;margin-bottom:3px;}
-    .name{font-size:14px;font-weight:700;color:#222;margin-bottom:8px;}
-    .cc-box{background:#fff8e1;border:1px solid #f39c12;border-radius:5px;padding:5px 8px;margin:5px 0;text-align:left;}
-    .cc-label{font-size:9px;color:#888;font-weight:700;margin-bottom:2px;}
-    .cc-text{font-size:12px;color:#333;font-weight:600;}
-    .foot{font-size:9px;color:#aaa;margin-top:8px;border-top:1px dashed #eee;padding-top:5px;}
-    @media print{body{padding:0;width:auto;}button{display:none!important;}}
-  </style></head><body>
+
+    /* ── @page: force 80mm receipt paper, no margins ── */
+    @page {
+      size: 80mm auto;
+      margin: 0;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      font-family: 'Sarabun', 'TH Sarabun New', sans-serif;
+      background: #fff;
+      width: 80mm;
+      max-width: 80mm;
+      margin: 0 auto;
+      padding: 0;
+      /* Prevent browser from scaling content to fill A4 */
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+
+    .ticket {
+      width: 76mm;
+      margin: 2mm auto;
+      border: 1.5px dashed #1a5276;
+      border-radius: 6px;
+      padding: 8px 10px;
+      text-align: center;
+    }
+
+    .clinic-row {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 5px;
+      border-bottom: 1px solid #ddd;
+      padding-bottom: 6px;
+      margin-bottom: 8px;
+    }
+    .clinic-name { font-size: 9.5px; font-weight: 700; color: #1a5276; line-height: 1.3; text-align: left; }
+
+    .qlabel { font-size: 9px; color: #888; letter-spacing: 2px; margin-bottom: 2px; text-transform: uppercase; }
+    .qnum   { font-size: 52px; font-weight: 800; color: #1a5276; line-height: 1; margin: 4px 0 6px; }
+
+    .hn   { font-size: 11px; font-weight: 700; color: #555; margin-bottom: 2px; }
+    .name { font-size: 13px; font-weight: 700; color: #222; margin-bottom: 6px; }
+
+    .cc-box   { background: #fff8e1; border: 1px solid #f39c12; border-radius: 4px; padding: 5px 8px; margin: 5px 0; text-align: left; }
+    .cc-label { font-size: 8.5px; color: #888; font-weight: 700; margin-bottom: 2px; letter-spacing: 0.5px; }
+    .cc-text  { font-size: 11px; color: #333; font-weight: 600; line-height: 1.4; }
+
+    .foot { font-size: 8.5px; color: #aaa; margin-top: 8px; border-top: 1px dashed #eee; padding-top: 5px; line-height: 1.5; }
+
+    /* Screen-only print button */
+    .print-btn-wrap { text-align: center; margin: 8px 0 4px; }
+    .print-btn {
+      padding: 7px 22px;
+      background: #1a5276;
+      color: #fff;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 13px;
+      font-family: 'Sarabun', sans-serif;
+      font-weight: 700;
+    }
+
+    /* Print: hide button, force receipt paper size */
+    @media print {
+      html, body {
+        width: 80mm;
+        max-width: 80mm;
+        margin: 0;
+        padding: 0;
+      }
+      .print-btn-wrap { display: none !important; }
+      .ticket { border: 1.5px dashed #1a5276 !important; margin: 1mm auto; }
+    }
+  </style>
+  </head><body>
   <div class="ticket">
-    <div class="clinic"><img src="${CLINIC_LOGO}" alt="logo" style="height:28px;vertical-align:middle;margin-right:5px;"/>${CLINIC_NAME}</div>
+    <div class="clinic-row">
+      <img src="${CLINIC_LOGO}" alt="logo" style="height:26px;flex-shrink:0;"/>
+      <div class="clinic-name">${CLINIC_NAME}</div>
+    </div>
     <div class="qlabel">หมายเลขคิว / QUEUE NO.</div>
     <div class="qnum">${qNum}</div>
     <div class="hn">HN: ${pat.hn}</div>
     <div class="name">${(pat.prefix || '') + pat.fname} ${pat.lname}</div>
     ${cc ? `<div class="cc-box"><div class="cc-label">อาการที่มาพบแพทย์</div><div class="cc-text">${cc}</div></div>` : ''}
-    <div class="foot">${thaiDate(today())} เวลา ${now} น.</div>
+    <div class="foot">
+      <div>${thaiDate(today())}</div>
+      <div>เวลา ${now} น.</div>
+    </div>
   </div>
-  <div style="text-align:center;margin-top:8px;">
-    <button onclick="window.print()" style="padding:7px 20px;background:#1a5276;color:#fff;border:none;border-radius:5px;cursor:pointer;font-size:13px;font-family:'Sarabun',sans-serif;font-weight:700;">🖨️ พิมพ์บัตรคิว</button>
-  </div></body></html>`);
+  <div class="print-btn-wrap">
+    <button class="print-btn" onclick="window.print()">🖨️ พิมพ์บัตรคิว</button>
+  </div>
+  </body></html>`);
     win.document.close();
-    setTimeout(() => { win.focus(); win.print(); }, 500);
+    // Trigger print after fonts load
+    setTimeout(() => { win.focus(); win.print(); }, 700);
 }
 // ===================== BLANK MEDICAL RECORD PRINT =====================
 function printBlankMedRecord() {
