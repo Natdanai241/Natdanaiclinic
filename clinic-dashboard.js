@@ -28,6 +28,17 @@ const supa = {
         }
         return badCol;
     },
+    // ── Detect RLS / permission errors
+    _isRlsError(status, errText) {
+        if (status === 403) return true;
+        try {
+            const e = JSON.parse(errText);
+            if (e.code === '42501') return true;
+            if ((e.message || '').toLowerCase().includes('permission denied')) return true;
+            if ((e.message || '').toLowerCase().includes('row-level security')) return true;
+        } catch (_) {}
+        return false;
+    },
 
     // ── Generic fetch all rows from a table
     async getAll(table) {
@@ -51,6 +62,10 @@ const supa = {
             if (!r.ok) {
                 const errText = await r.text();
                 console.error(`insert ${table} [HTTP ${r.status}]:`, errText);
+                if (this._isRlsError(r.status, errText)) {
+                    console.error(`insert ${table}: RLS/permission error`);
+                    return 'RLS_ERROR';
+                }
                 if (_depth < 10 && this._learnBadCol(table, errText)) {
                     return this.insert(table, data, _depth + 1);
                 }
@@ -73,6 +88,10 @@ const supa = {
             if (!r.ok) {
                 const errText = await r.text();
                 console.error(`patch ${table} [HTTP ${r.status}]:`, errText);
+                if (this._isRlsError(r.status, errText)) {
+                    console.error(`patch ${table}: RLS/permission error`);
+                    return 'RLS_ERROR';
+                }
                 if (_depth < 10 && this._learnBadCol(table, errText)) {
                     return this.patch(table, pkCol, pkVal, data, _depth + 1);
                 }
@@ -117,6 +136,11 @@ const supa = {
             if (r.ok) return r.json();
             const errText = await r.text();
             console.error(`upsert ${table} [HTTP ${r.status}]:`, errText);
+            // RLS / permission error
+            if (this._isRlsError(r.status, errText)) {
+                console.error(`upsert ${table}: RLS/permission error`);
+                return 'RLS_ERROR';
+            }
             // Unknown column — strip and retry
             if (_depth < 10 && this._learnBadCol(table, errText)) {
                 return this.upsert(table, data, _depth + 1);
@@ -405,6 +429,7 @@ function ClinicDashboard() {
     const [page, setPage] = useState('dashboard');
     const [dbReady, setDbReady] = useState(false);
     const [dbError, setDbError] = useState(null);
+    const [rlsError, setRlsError] = useState(false);
     const [loading, setLoading] = useState(true);
     // ── App state — starts from SAMPLE data, gets overwritten by DB on load
     const [patients, setPatients] = useState(SAMPLE_PATIENTS);
@@ -518,6 +543,7 @@ function ClinicDashboard() {
                 result = await supa.patch('visits', 'id', v.id, dbRow);
             }
         }
+        if (result === 'RLS_ERROR') { setRlsError(true); return null; }
         return result; // null = DB error
     };
     const saveReceipt = async (r) => {
@@ -622,6 +648,26 @@ function ClinicDashboard() {
             : dbReady
                 ? React.createElement("span", null, "\u2705 \u0E40\u0E0A\u0E37\u0E48\u0E2D\u0E21\u0E15\u0E48\u0E2D Supabase \u0E41\u0E25\u0E49\u0E27 \u2014 \u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25\u0E1A\u0E31\u0E19\u0E17\u0E36\u0E01\u0E2D\u0E31\u0E15\u0E42\u0E19\u0E21\u0E31\u0E15\u0E34")
                 : React.createElement("span", null, "\u23F3 \u0E01\u0E33\u0E25\u0E31\u0E07\u0E40\u0E0A\u0E37\u0E48\u0E2D\u0E21\u0E15\u0E48\u0E2D...")))),
+        rlsError && React.createElement("div", { style: { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 9998, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 } },
+            React.createElement("div", { style: { background: '#fff', borderRadius: 12, padding: 24, maxWidth: 540, width: '100%', boxShadow: '0 8px 40px rgba(0,0,0,0.3)' } },
+                React.createElement("div", { style: { fontSize: 20, fontWeight: 700, color: '#c0392b', marginBottom: 8 } }, "\uD83D\uDD12 Supabase \u0E44\u0E21\u0E48\u0E2D\u0E19\u0E38\u0E0D\u0E32\u0E15\u0E43\u0E2B\u0E49\u0E1A\u0E31\u0E19\u0E17\u0E36\u0E01\u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25"),
+                React.createElement("div", { style: { fontSize: 14, color: '#444', marginBottom: 16, lineHeight: 1.7 } },
+                    "\u0E15\u0E32\u0E23\u0E32\u0E07\u0E43\u0E19\u0E10\u0E32\u0E19\u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25\u0E40\u0E1B\u0E34\u0E14 ", React.createElement("b", null, "Row Level Security (RLS)"), " \u0E44\u0E27\u0E49 \u0E41\u0E15\u0E48\u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E21\u0E35 Policy \u0E17\u0E35\u0E48\u0E2D\u0E19\u0E38\u0E0D\u0E32\u0E15\u0E43\u0E2B\u0E49 anon role INSERT/UPDATE", React.createElement("br", null),
+                    "\u0E43\u0E2B\u0E49\u0E23\u0E31\u0E19 SQL \u0E14\u0E49\u0E32\u0E19\u0E25\u0E48\u0E32\u0E07\u0E43\u0E19 ", React.createElement("b", null, "Supabase \u2192 SQL Editor"), " \u0E40\u0E1E\u0E37\u0E48\u0E2D\u0E41\u0E01\u0E49\u0E44\u0E02:"),
+                React.createElement("pre", { style: { background: '#1e1e1e', color: '#9cdcfe', borderRadius: 8, padding: 14, fontSize: 11, overflowX: 'auto', marginBottom: 16, lineHeight: 1.6 } },
+                    `-- วิ่งใน Supabase SQL Editor\nDO $$\nDECLARE t text;\nBEGIN\n  FOREACH t IN ARRAY ARRAY['patients','visits','receipts','appointments','medicines','treatment_services']\n  LOOP\n    EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', t);\n    EXECUTE format(\n      'CREATE POLICY IF NOT EXISTS "anon_all" ON %I FOR ALL TO anon USING (true) WITH CHECK (true)', t);\n  END LOOP;\nEND $$;`),
+                React.createElement("div", { style: { display: 'flex', gap: 8 } },
+                    React.createElement("button", {
+                        onClick: () => {
+                            const sql = `DO $$\nDECLARE t text;\nBEGIN\n  FOREACH t IN ARRAY ARRAY['patients','visits','receipts','appointments','medicines','treatment_services']\n  LOOP\n    EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', t);\n    EXECUTE format(\n      'CREATE POLICY IF NOT EXISTS "anon_all" ON %I FOR ALL TO anon USING (true) WITH CHECK (true)', t);\n  END LOOP;\nEND $$;`;
+                            navigator.clipboard.writeText(sql).then(() => alert('\u2705 \u0E04\u0E31\u0E14\u0E25\u0E2D\u0E01 SQL \u0E41\u0E25\u0E49\u0E27 \u2014 \u0E27\u0E32\u0E07\u0E43\u0E19 Supabase SQL Editor \u0E41\u0E25\u0E49\u0E27\u0E01\u0E14 Run'));
+                        },
+                        style: { flex: 1, background: '#2e86c1', color: '#fff', border: 'none', borderRadius: 7, padding: '10px 0', fontSize: 14, fontWeight: 700, cursor: 'pointer' }
+                    }, "\uD83D\uDCCB \u0E04\u0E31\u0E14\u0E25\u0E2D\u0E01 SQL"),
+                    React.createElement("button", {
+                        onClick: () => setRlsError(false),
+                        style: { flex: 1, background: '#eee', color: '#333', border: 'none', borderRadius: 7, padding: '10px 0', fontSize: 14, cursor: 'pointer' }
+                    }, "\u0E1B\u0E34\u0E14 (\u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25\u0E16\u0E39\u0E01\u0E1A\u0E31\u0E19\u0E17\u0E36\u0E01\u0E43\u0E19\u0E2B\u0E19\u0E49\u0E32\u0E08\u0E2D\u0E41\u0E25\u0E49\u0E27)")))),
         React.createElement("div", { style: { background: `linear-gradient(135deg,#1a5276,#2e86c1)`, color: '#fff', padding: '0 0 0 0', boxShadow: '0 2px 12px rgba(26,82,118,0.25)' } },
             React.createElement("div", { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 24px 0' } },
                 React.createElement("div", { style: { display: 'flex', alignItems: 'center', gap: 14 } },

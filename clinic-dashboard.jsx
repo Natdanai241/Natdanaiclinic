@@ -30,6 +30,18 @@ const supa = {
     return badCol;
   },
 
+  // ── Detect RLS / permission errors (42501, 403, permission denied)
+  _isRlsError(status, errText) {
+    if (status === 403) return true;
+    try {
+      const e = JSON.parse(errText);
+      if (e.code === '42501') return true;
+      if ((e.message||'').toLowerCase().includes('permission denied')) return true;
+      if ((e.message||'').toLowerCase().includes('row-level security')) return true;
+    } catch(_) {}
+    return false;
+  },
+
   // ── Generic fetch all rows from a table
   async getAll(table) {
     try {
@@ -52,6 +64,10 @@ const supa = {
       if (!r.ok) {
         const errText = await r.text();
         console.error(`insert ${table} [HTTP ${r.status}]:`, errText);
+        if (this._isRlsError(r.status, errText)) {
+          console.error(`insert ${table}: RLS/permission error — add INSERT policy for anon role`);
+          return 'RLS_ERROR';
+        }
         if (_depth < 10 && this._learnBadCol(table, errText)) {
           return this.insert(table, data, _depth + 1);
         }
@@ -74,6 +90,10 @@ const supa = {
       if (!r.ok) {
         const errText = await r.text();
         console.error(`patch ${table} [HTTP ${r.status}]:`, errText);
+        if (this._isRlsError(r.status, errText)) {
+          console.error(`patch ${table}: RLS/permission error — add UPDATE policy for anon role`);
+          return 'RLS_ERROR';
+        }
         if (_depth < 10 && this._learnBadCol(table, errText)) {
           return this.patch(table, pkCol, pkVal, data, _depth + 1);
         }
@@ -120,6 +140,12 @@ const supa = {
       const errText = await r.text();
       console.error(`upsert ${table} [HTTP ${r.status}]:`, errText);
 
+      // RLS / permission error
+      if (this._isRlsError(r.status, errText)) {
+        console.error(`upsert ${table}: RLS/permission error — add policy for anon role`);
+        return 'RLS_ERROR';
+      }
+
       // Unknown column → strip and retry insert
       if (_depth < 10 && this._learnBadCol(table, errText)) {
         return this.upsert(table, data, _depth + 1);
@@ -131,7 +157,6 @@ const supa = {
       const pgCode = errObj?.code || '';
       if (r.status === 409 || pgCode === '23505') {
         console.warn(`upsert ${table}: conflict on insert, falling back to PATCH`);
-        // Find primary key — try common names
         const pkCol = 'id';
         const pkVal = data[pkCol];
         if (pkVal !== undefined) {
@@ -416,6 +441,7 @@ function ClinicDashboard() {
   const [page, setPage] = useState('dashboard');
   const [dbReady, setDbReady] = useState(false);
   const [dbError, setDbError] = useState(null);
+  const [rlsError, setRlsError] = useState(false);
   const [loading, setLoading] = useState(true);
 
   // ── App state — starts from SAMPLE data, gets overwritten by DB on load
@@ -507,17 +533,15 @@ function ClinicDashboard() {
     const dbRow = toDbVisit(v);
     let result;
     if (existedInDb) {
-      // Record already exists in DB — use PATCH to update it
       result = await supa.patch('visits', 'id', v.id, dbRow);
     } else {
-      // New record — INSERT, with fallback to PATCH if already exists (race condition)
       result = await supa.insert('visits', dbRow);
       if (result === null) {
-        // INSERT failed — try PATCH as fallback (visit may have been saved before)
         console.warn('saveVisit: insert failed, trying patch as fallback');
         result = await supa.patch('visits', 'id', v.id, dbRow);
       }
     }
+    if (result === 'RLS_ERROR') { setRlsError(true); return null; }
     return result; // null = DB error
   };
 
@@ -647,6 +671,40 @@ function ClinicDashboard() {
             }
           </div>
         )
+      )}
+      {/* ── RLS Error Modal — shown when Supabase blocks writes due to missing policies */}
+      {rlsError&&(
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.7)',zIndex:9998,display:'flex',alignItems:'center',justifyContent:'center',padding:16}}>
+          <div style={{background:'#fff',borderRadius:12,padding:24,maxWidth:540,width:'100%',boxShadow:'0 8px 40px rgba(0,0,0,0.3)'}}>
+            <div style={{fontSize:20,fontWeight:700,color:'#c0392b',marginBottom:8}}>🔒 Supabase ไม่อนุญาตให้บันทึกข้อมูล</div>
+            <div style={{fontSize:14,color:'#444',marginBottom:16,lineHeight:1.7}}>
+              ตารางในฐานข้อมูลเปิด <b>Row Level Security (RLS)</b> ไว้ แต่ยังไม่มี Policy ที่อนุญาตให้ anon role INSERT/UPDATE<br/>
+              ให้รัน SQL ด้านล่างใน <b>Supabase → SQL Editor</b> เพื่อแก้ไข:
+            </div>
+            <pre style={{background:'#1e1e1e',color:'#9cdcfe',borderRadius:8,padding:14,fontSize:11,overflowX:'auto',marginBottom:16,lineHeight:1.6}}>{`-- วิ่งใน Supabase SQL Editor
+DO $$
+DECLARE t text;
+BEGIN
+  FOREACH t IN ARRAY ARRAY['patients','visits','receipts','appointments','medicines','treatment_services']
+  LOOP
+    EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', t);
+    EXECUTE format(
+      'CREATE POLICY IF NOT EXISTS "anon_all" ON %I FOR ALL TO anon USING (true) WITH CHECK (true)', t);
+  END LOOP;
+END $$;`}</pre>
+            <div style={{display:'flex',gap:8}}>
+              <button onClick={()=>{
+                const sql=`DO $$\nDECLARE t text;\nBEGIN\n  FOREACH t IN ARRAY ARRAY['patients','visits','receipts','appointments','medicines','treatment_services']\n  LOOP\n    EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', t);\n    EXECUTE format(\n      'CREATE POLICY IF NOT EXISTS "anon_all" ON %I FOR ALL TO anon USING (true) WITH CHECK (true)', t);\n  END LOOP;\nEND $$;`;
+                navigator.clipboard.writeText(sql).then(()=>alert('✅ คัดลอก SQL แล้ว — วางใน Supabase SQL Editor แล้วกด Run'));
+              }} style={{flex:1,background:'#2e86c1',color:'#fff',border:'none',borderRadius:7,padding:'10px 0',fontSize:14,fontWeight:700,cursor:'pointer'}}>
+                📋 คัดลอก SQL
+              </button>
+              <button onClick={()=>setRlsError(false)} style={{flex:1,background:'#eee',color:'#333',border:'none',borderRadius:7,padding:'10px 0',fontSize:14,cursor:'pointer'}}>
+                ปิด (ข้อมูลถูกบันทึกในหน้าจอแล้ว)
+              </button>
+            </div>
+          </div>
+        </div>
       )}
       {/* HEADER */}
       <div style={{background:`linear-gradient(135deg,#1a5276,#2e86c1)`,color:'#fff',padding:'0 0 0 0',boxShadow:'0 2px 12px rgba(26,82,118,0.25)'}}>
@@ -1658,8 +1716,8 @@ function ExaminePage({patients,visits,saveVisit,nextVID,getPatient,getVisitsForH
     setLastVisit(completed);
     const result = await saveVisit(completed);
     if(result===null){
-      console.error('save: DB write failed after retries');
-      alert('⚠️ บันทึกสำเร็จในหน้าจอแล้ว แต่ไม่สามารถ sync ฐานข้อมูลได้\nข้อมูลการตรวจถูกเก็บในหน้าจอนี้แล้ว\n\nกรุณาตรวจสอบ Console (F12) สำหรับรายละเอียด error\nหากปัญหายังอยู่ให้ลองกด "บันทึกการตรวจ" อีกครั้ง');
+      console.error('save: DB write failed');
+      // rlsError is set by saveVisit if it detected a permissions issue
     } else {
       alert('✅ บันทึกการตรวจเรียบร้อย\nย้ายผู้ป่วยไปที่ "ตรวจเสร็จแล้ว" แล้ว');
     }
