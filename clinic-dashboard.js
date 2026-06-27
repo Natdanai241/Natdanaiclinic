@@ -1639,7 +1639,7 @@ function ExaminePage({ patients, visits, saveVisit, nextVID, getPatient, getVisi
         const completed = { ...vform, status: 'ตรวจเสร็จ' };
         const vResult = await saveVisit(completed);
         if (vResult === null) {
-            alert('⚠️ ออกใบเสร็จสำเร็จ แต่เกิดข้อผิดพลาดในการบันทึกสถานะ Visit\nกรุณาตรวจสอบการเชื่อมต่อและลองบันทึกอีกครั้ง');
+            console.error('issueReceiptOnly: visit save failed');
         }
         setVform(completed);
         setSaved(true);

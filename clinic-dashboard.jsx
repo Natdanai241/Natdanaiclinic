@@ -1755,7 +1755,8 @@ function ExaminePage({patients,visits,saveVisit,nextVID,getPatient,getVisitsForH
     const completed = {...vform, status:'ตรวจเสร็จ'};
     const vResult = await saveVisit(completed);
     if(vResult===null){
-      alert('⚠️ ออกใบเสร็จสำเร็จแล้ว แต่ไม่สามารถบันทึกสถานะ Visit ลงฐานข้อมูลได้\nกรุณาตรวจสอบ Console (F12) สำหรับรายละเอียด\nแล้วกด "บันทึกการตรวจ" เพื่อ sync ข้อมูลอีกครั้ง');
+      console.error('issueReceiptOnly: visit status save failed');
+      // rlsError modal shown by saveVisit if it is a permissions issue
     }
     setVform(completed);
     setSaved(true);
