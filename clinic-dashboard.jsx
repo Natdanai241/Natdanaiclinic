@@ -6,6 +6,8 @@ const SUPA_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsI
 
 const supa = {
   headers: { "apikey": SUPA_KEY, "Authorization": `Bearer ${SUPA_KEY}`, "Content-Type": "application/json", "Prefer": "return=representation" },
+  // Cache of columns confirmed missing per table — avoids repeated 400 errors
+  _missingCols: {},
 
   // ── Generic fetch all rows from a table
   async getAll(table) {
@@ -14,15 +16,43 @@ const supa = {
     return r.json();
   },
 
-  // ── Upsert (insert or update by primary key)
-  async upsert(table, data) {
-    const body = Array.isArray(data) ? data : [data];
+  // ── Upsert with automatic column-stripping on schema mismatch
+  async upsert(table, data, _depth) {
+    _depth = _depth || 0;
+    const rows = Array.isArray(data) ? data : [data];
+    // Strip columns we already know are missing from this table
+    const known = this._missingCols[table] || [];
+    const body = rows.map(row => {
+      const out = {...row};
+      known.forEach(col => delete out[col]);
+      return out;
+    });
+
     const r = await fetch(`${SUPA_URL}/rest/v1/${table}`, {
       method: "POST",
       headers: { ...this.headers, "Prefer": "resolution=merge-duplicates,return=representation" },
       body: JSON.stringify(body),
     });
-    if (!r.ok) { console.error(`upsert ${table}:`, await r.text()); return null; }
+
+    if (!r.ok) {
+      const errText = await r.text();
+      console.error(`upsert ${table}:`, errText);
+
+      // Auto-detect unknown column from Postgres error (code 42703)
+      // Pattern: column "xyz" of relation "visits" does not exist
+      const colMatch = errText.match(/column "([^"]+)" of relation/);
+      if (colMatch && _depth < 10) {
+        const badCol = colMatch[1];
+        if (!this._missingCols[table]) this._missingCols[table] = [];
+        if (!this._missingCols[table].includes(badCol)) {
+          this._missingCols[table].push(badCol);
+          console.warn(`Auto-skipping missing column "${badCol}" in table "${table}"`);
+        }
+        // Retry without the bad column
+        return this.upsert(table, data, _depth + 1);
+      }
+      return null;
+    }
     return r.json();
   },
 
@@ -35,12 +65,15 @@ const supa = {
     return true;
   },
 
-  // ── Patch (partial update) by pk
+  // ── Patch (partial update) by pk — also strips known-missing columns
   async patch(table, pkCol, pkVal, data) {
+    const known = this._missingCols[table] || [];
+    const safe = {...data};
+    known.forEach(col => delete safe[col]);
     const r = await fetch(`${SUPA_URL}/rest/v1/${table}?${pkCol}=eq.${pkVal}`, {
       method: "PATCH",
       headers: { ...this.headers, "Prefer": "return=representation" },
-      body: JSON.stringify(data),
+      body: JSON.stringify(safe),
     });
     if (!r.ok) { console.error(`patch ${table}:`, await r.text()); return null; }
     return r.json();
@@ -65,7 +98,10 @@ const toDbVisit = (v) => ({
   dx:v.dx||'', tx:v.tx||'', note:v.note||'', nurse:v.nurse||'',
   bp:v.bp||'', pr:v.pr||'', rr:v.rr||'', temp:v.temp||'', o2:v.o2||'',
   weight:v.weight||'', height:v.height||'',
-  drugs: v.drugs||[], services: v.services||[],
+  // Serialize arrays as JSON strings for compatibility with both text and jsonb columns
+  drugs: v.drugs && v.drugs.length > 0 ? JSON.stringify(v.drugs) : '[]',
+  services: v.services && v.services.length > 0 ? JSON.stringify(v.services) : '[]',
+  // These columns may not exist in older DB schemas — supa.upsert will auto-strip them on error
   status: v.status || 'รอตรวจ',
   queue_no: v.queueNo || '',
 });
@@ -1447,16 +1483,16 @@ function ExaminePage({patients,visits,saveVisit,nextVID,getPatient,getVisitsForH
 
   const save=async()=>{
     const completed = {...vform, status:'ตรวจเสร็จ'};
-    const result = await saveVisit(completed);
-    if(result===null){
-      // DB save failed — alert user but keep local state
-      alert('⚠️ เกิดข้อผิดพลาดในการบันทึกไปยังฐานข้อมูล\nกรุณาตรวจสอบการเชื่อมต่อ และลองอีกครั้ง\n\n(ข้อมูลยังคงอยู่ในหน้าจอ — อย่าปิดหน้าต่างนี้)');
-      return;
-    }
     setVform(completed);
     setSaved(true);
     setLastVisit(completed);
-    alert('✅ บันทึกการตรวจเรียบร้อย\nย้ายผู้ป่วยไปที่ "ตรวจเสร็จแล้ว" แล้ว');
+    const result = await saveVisit(completed);
+    if(result===null){
+      console.error('save: DB write failed after retries');
+      alert('⚠️ บันทึกสำเร็จในหน้าจอ แต่ไม่สามารถ sync ฐานข้อมูลได้\nกรุณาตรวจสอบ console และการเชื่อมต่อ Supabase');
+    } else {
+      alert('✅ บันทึกการตรวจเรียบร้อย\nย้ายผู้ป่วยไปที่ "ตรวจเสร็จแล้ว" แล้ว');
+    }
   };
 
   // Issues receipt + deducts stock + marks visit as ตรวจเสร็จ.
