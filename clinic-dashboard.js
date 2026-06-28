@@ -37,18 +37,17 @@ function sha256(text) {
 // In-memory user store backed by localStorage key "clinic_users"
 const AUTH_KEY = 'clinic_users_v1';
 const SESSION_KEY = 'clinic_session_v1';
-// Seed test accounts hashes (SHA-256 of single char password)
-// d -> doctor, n -> nurse, s -> staff
-// Pre-computed: sha256('d')='3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314f2398f9036'
-//               sha256('n')='2c624232cdd221771294dfbb310acbc8a14682031f00c3e4a5de18b5be3fb8c7'
-//               sha256('s')='a6b46dd0d1ae5e86cbc8f37e75ceeb6760230c1ca4ffbcb0c97b96dd7d9c464b'
+// Seed test accounts — SHA-256 hashes verified with Node.js crypto
+// sha256('d') = 18ac3e7343f016890c510e93f935261169d9e3f565436429830faf0934f4f8e4
+// sha256('n') = 1b16b1df538ba12dc3f97edbb85caa7050d46c148134290feba80f8236c83db9
+// sha256('s') = 043a718774c572bd8a25adbeb1bfcd5c0256ae11cecf9f9c3f925d0e52beaf89
 const TEST_ACCOUNTS = [
     { id: 'U_D', name: 'Doctor Natdanai', username: 'd', email: '', lineId: '', role: 'doctor',
-        passHash: '3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314f2398f9036', createdAt: '2025-01-01' },
+        passHash: '18ac3e7343f016890c510e93f935261169d9e3f565436429830faf0934f4f8e4', createdAt: '2025-01-01' },
     { id: 'U_N', name: 'Nurse', username: 'n', email: '', lineId: '', role: 'nurse',
-        passHash: '2c624232cdd221771294dfbb310acbc8a14682031f00c3e4a5de18b5be3fb8c7', createdAt: '2025-01-01' },
+        passHash: '1b16b1df538ba12dc3f97edbb85caa7050d46c148134290feba80f8236c83db9', createdAt: '2025-01-01' },
     { id: 'U_S', name: 'Other Staff', username: 's', email: '', lineId: '', role: 'staff',
-        passHash: 'a6b46dd0d1ae5e86cbc8f37e75ceeb6760230c1ca4ffbcb0c97b96dd7d9c464b', createdAt: '2025-01-01' },
+        passHash: '043a718774c572bd8a25adbeb1bfcd5c0256ae11cecf9f9c3f925d0e52beaf89', createdAt: '2025-01-01' },
 ];
 function loadUsers() {
     try {
