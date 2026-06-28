@@ -519,11 +519,30 @@ const toDbVisit = (v) => ({
   queue_no: v.queueNo || '',
 });
 
-const fromDbReceipt = (r) => r ? ({
-  id:r.id, hn:r.hn, visitId:r.visit_id, patname:r.patname, date:r.date,
-  items: Array.isArray(r.items) ? r.items : (()=>{ try{ return r.items ? JSON.parse(r.items) : []; } catch(_){ return []; } })(),
-  discount:r.discount||0, paid:r.paid||'เงินสด', status:r.status||'รอชำระ',
-}) : null;
+const fromDbReceipt = (r) => {
+  if (!r) return null;
+  // Parse items — Supabase may return jsonb as already-parsed array or as a JSON string
+  let items = [];
+  if (Array.isArray(r.items)) {
+    items = r.items;
+  } else if (r.items) {
+    try { items = JSON.parse(r.items); } catch(_) { items = []; }
+  }
+  // Ensure each item has numeric qty/price (DB may return strings)
+  items = items.map(it => ({
+    ...it,
+    qty: Number(it.qty) || 0,
+    price: Number(it.price) || 0,
+  }));
+  // If status column doesn't exist in DB, r.status === undefined/null.
+  // Treat missing status as 'ชำระแล้ว' (legacy receipts were all paid),
+  // but only 'รอชำระ' when explicitly set to that value.
+  const status = (r.status === 'รอชำระ') ? 'รอชำระ' : (r.status || 'ชำระแล้ว');
+  return {
+    id: r.id, hn: r.hn, visitId: r.visit_id, patname: r.patname, date: r.date,
+    items, discount: Number(r.discount) || 0, paid: r.paid || 'เงินสด', status,
+  };
+};
 
 const toDbReceipt = (r) => ({
   id:r.id, hn:r.hn, visit_id:r.visitId||'', patname:r.patname||'',
@@ -957,10 +976,12 @@ function ClinicDashboard({session,onLogout}) {
   const todayAppoints = appointments.filter(a=>a.date===todayStr).length;
   const lowStock = medicines.filter(m=>m.stock<=m.minstock).length;
   const monthReceipts = receipts.filter(r=>r.date&&r.date.startsWith(todayStr.slice(0,7)));
-  const monthRevenue = monthReceipts.reduce((s,r)=>{
-    const total = (r.items||[]).reduce((t,i)=>t+(Number(i.qty)||0)*(Number(i.price)||0),0)-(Number(r.discount)||0);
-    return s+total;
-  },0);
+  const monthRevenue = monthReceipts
+    .filter(r => r.status === 'ชำระแล้ว')
+    .reduce((s,r)=>{
+      const total = (r.items||[]).reduce((t,i)=>t+(Number(i.qty)||0)*(Number(i.price)||0),0)-(Number(r.discount)||0);
+      return s+total;
+    },0);
 
   const NAV_ALL = [
     {key:'dashboard',icon:'📊',label:'หน้าหลัก'},
@@ -4675,11 +4696,13 @@ function AccountingPage({receipts,today}) {
   const filtIncome=receipts.filter(r=>inRange(r.date));
   const filtExp=expenses.filter(e=>inRange(e.date));
   const calcAmt=(r)=>(r.items||[]).reduce((t,i)=>t+(Number(i.qty)||0)*(Number(i.price)||0),0)-(Number(r.discount)||0);
+  // totalIncome counts ALL receipts in range (including pending) for full picture
   const totalIncome=filtIncome.reduce((s,r)=>s+calcAmt(r),0);
+  // paidIncome = only confirmed paid — this is the real revenue
   const paidIncome=filtIncome.filter(r=>r.status==='ชำระแล้ว').reduce((s,r)=>s+calcAmt(r),0);
   const pendingIncome=totalIncome-paidIncome;
-  const totalExpense=filtExp.reduce((s,e)=>s+e.amount,0);
-  const netProfit=totalIncome-totalExpense;
+  const totalExpense=filtExp.reduce((s,e)=>s+(Number(e.amount)||0),0);
+  const netProfit=paidIncome-totalExpense;
 
   const saveExp=(f)=>{
     if(f.id&&expenses.find(e=>e.id===f.id)){setExpenses(prev=>prev.map(e=>e.id===f.id?f:e));}
@@ -4714,7 +4737,17 @@ function AccountingPage({receipts,today}) {
         </div>
       </div>
 
-      {/* Filters */}
+      {/* DB schema diagnostic — shown only when receipts exist but all show 0 income */}
+      {receipts.length>0 && totalIncome===0 && (
+        <div className="no-print" style={{background:'#fff3cd',border:'1px solid #ffc107',borderRadius:8,padding:'10px 14px',marginBottom:12,fontSize:12}}>
+          ⚠️ <strong>พบใบเสร็จ {receipts.length} รายการแต่รายรับแสดง 0</strong> — อาจเกิดจาก:
+          <ol style={{marginTop:6,paddingLeft:20}}>
+            <li>ตาราง <code>receipts</code> ยังไม่มีคอลัมน์ <code>status</code> หรือ <code>items</code> ใน Supabase → รัน SQL ด้านล่างแก้ไข</li>
+            <li>ข้อมูล items ใน DB เป็น text ไม่ใช่ jsonb → รัน SQL แปลง type</li>
+          </ol>
+          <div style={{marginTop:6,background:'#2d2d2d',color:'#f8f8f2',borderRadius:6,padding:'8px 10px',fontFamily:'monospace',fontSize:11,whiteSpace:'pre-wrap'}}{...{}}>{`-- วางใน Supabase SQL Editor แล้วกด Run:\nALTER TABLE receipts ADD COLUMN IF NOT EXISTS status text DEFAULT 'ชำระแล้ว';\nALTER TABLE receipts ADD COLUMN IF NOT EXISTS paid text DEFAULT 'เงินสด';\nALTER TABLE receipts ADD COLUMN IF NOT EXISTS discount numeric DEFAULT 0;\nALTER TABLE receipts ADD COLUMN IF NOT EXISTS patname text DEFAULT '';\nALTER TABLE receipts ADD COLUMN IF NOT EXISTS visit_id text DEFAULT '';\n-- แปลง items เป็น jsonb (ถ้ายังเป็น text):\nALTER TABLE receipts ALTER COLUMN items TYPE jsonb USING items::jsonb;\n-- เปิด RLS ให้ anon อ่าน-เขียนได้:\nALTER TABLE receipts ENABLE ROW LEVEL SECURITY;\nDROP POLICY IF EXISTS "anon_all" ON receipts;\nCREATE POLICY "anon_all" ON receipts FOR ALL TO anon USING (true) WITH CHECK (true);`}</div>
+        </div>
+      )}
       <div className="card no-print" style={{marginBottom:14}}>
         <div style={{display:'flex',gap:6,flexWrap:'wrap',alignItems:'center',marginBottom:10}}>
           <span style={{fontWeight:600,fontSize:13}}>ช่วงเวลา:</span>
@@ -4774,10 +4807,10 @@ function AccountingPage({receipts,today}) {
         {/* Summary cards */}
         <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(170px,1fr))',gap:12,marginBottom:16}}>
           {showType!=='expense'&&<div className="card" style={{textAlign:'center',border:'2px solid var(--accent)'}}>
-            <div style={{fontSize:11,color:'var(--accent)',fontWeight:700,marginBottom:4}}>💰 รายรับรวม</div>
-            <div style={{fontSize:22,fontWeight:700,color:'var(--accent)'}}>{totalIncome.toLocaleString()}</div>
-            <div style={{fontSize:11,color:'var(--gray)'}}>บาท ({filtIncome.length} รายการ)</div>
-            {pendingIncome>0&&<div style={{fontSize:10,marginTop:4,color:'#e67e22'}}>ชำระแล้ว {paidIncome.toLocaleString()} | รอชำระ {pendingIncome.toLocaleString()}</div>}
+            <div style={{fontSize:11,color:'var(--accent)',fontWeight:700,marginBottom:4}}>💰 รายรับรวม (ชำระแล้ว)</div>
+            <div style={{fontSize:22,fontWeight:700,color:'var(--accent)'}}>{paidIncome.toLocaleString()}</div>
+            <div style={{fontSize:11,color:'var(--gray)'}}>บาท ({filtIncome.filter(r=>r.status==='ชำระแล้ว').length} รายการ)</div>
+            {pendingIncome>0&&<div style={{fontSize:10,marginTop:4,color:'#e67e22'}}>รอชำระอีก {pendingIncome.toLocaleString()} บาท ({filtIncome.filter(r=>r.status!=='ชำระแล้ว').length} รายการ)</div>}
           </div>}
           {showType!=='income'&&<div className="card" style={{textAlign:'center',border:'2px solid var(--danger)'}}>
             <div style={{fontSize:11,color:'var(--danger)',fontWeight:700,marginBottom:4}}>💸 รายจ่ายรวม</div>
@@ -4831,7 +4864,7 @@ function AccountingPage({receipts,today}) {
               <tr style={{background:'#1a5276',color:'#fff',fontWeight:700,fontSize:13}}>
                 <td colSpan={showType==='both'?3:3} style={{padding:'9px 12px'}}>รวมทั้งหมด ({allRows.length} รายการ)</td>
                 <td style={{padding:'9px 12px'}}></td>
-                {showType!=='expense'&&<td style={{padding:'9px 12px',textAlign:'right'}}>{totalIncome.toLocaleString()}</td>}
+                {showType!=='expense'&&<td style={{padding:'9px 12px',textAlign:'right'}}>{paidIncome.toLocaleString()}{pendingIncome>0&&<span style={{fontSize:10,color:'#e67e22',marginLeft:4}}>(+รอ {pendingIncome.toLocaleString()})</span>}</td>}
                 {showType!=='income'&&<td style={{padding:'9px 12px',textAlign:'right'}}>{totalExpense.toLocaleString()}</td>}
                 {showType==='both'&&<td style={{padding:'9px 8px',textAlign:'right',fontSize:11}} className="no-print">กำไร: {netProfit.toLocaleString()}</td>}
                 {showType!=='both'&&<td className="no-print"></td>}

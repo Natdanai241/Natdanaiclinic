@@ -1,4 +1,13 @@
 "use strict";
+var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
+    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
+    return new (P || (P = Promise))(function (resolve, reject) {
+        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
+        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
+        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
+        step((generator = generator.apply(thisArg, _arguments || [])).next());
+    });
+};
 const { useState, useEffect, useRef } = React;
 const CLINIC_NAME = "คลินิกเวชกรรมแพทย์ณัฐดนัย";
 const CLINIC_ADDRESS = "101/2 หมู่ 12, ตำบลโป่งผา, อำเภอแม่สาย, จังหวัดเชียงราย, 57130";
@@ -19,9 +28,11 @@ const ROLE_ALLOWED = {
     staff: ['dashboard', 'register', 'cert', 'receipt', 'appoint'],
 };
 // Simple password hash (SHA-256 hex, computed client-side)
-async function sha256(text) {
-    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
-    return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+function sha256(text) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const buf = yield crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+        return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+    });
 }
 // In-memory user store backed by localStorage key "clinic_users"
 const AUTH_KEY = 'clinic_users_v1';
@@ -109,14 +120,14 @@ function LoginPage({ onLogin, onGoRegister }) {
     const [err, setErr] = React.useState('');
     const [loading, setLoading] = React.useState(false);
     const [showPass, setShowPass] = React.useState(false);
-    const doLogin = async () => {
+    const doLogin = () => __awaiter(this, void 0, void 0, function* () {
         if (!ident.trim() || !pass.trim()) {
             setErr('กรุณากรอกข้อมูลให้ครบ');
             return;
         }
         setLoading(true);
         setErr('');
-        const hash = await sha256(pass);
+        const hash = yield sha256(pass);
         const users = loadUsers();
         const id = ident.trim().toLowerCase();
         const u = users.find(u => u.username === id || u.email === id || u.lineId === id);
@@ -140,7 +151,7 @@ function LoginPage({ onLogin, onGoRegister }) {
         addAuditEntry({ user: u.username || u.name, action: 'login', module: 'ระบบ', detail: 'เข้าสู่ระบบ' });
         setLoading(false);
         onLogin(session);
-    };
+    });
     return (React.createElement("div", { style: { minHeight: '100vh', background: 'linear-gradient(135deg,#1a5276 0%,#2e86c1 60%,#1a8a5e 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, fontFamily: "'Sarabun','Noto Sans Thai',sans-serif" } },
         React.createElement("style", null, `@import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700&display=swap');*{box-sizing:border-box;margin:0;padding:0;}body{font-family:'Sarabun',sans-serif;}`),
         React.createElement("div", { style: { width: '100%', maxWidth: 420 } },
@@ -179,7 +190,7 @@ function RegisterPage_Auth({ onSuccess, onGoLogin }) {
     const [err, setErr] = React.useState('');
     const [loading, setLoading] = React.useState(false);
     const [showPass, setShowPass] = React.useState(false);
-    const doRegister = async () => {
+    const doRegister = () => __awaiter(this, void 0, void 0, function* () {
         if (!name.trim()) {
             setErr('กรุณากรอกชื่อ-นามสกุล');
             return;
@@ -233,14 +244,14 @@ function RegisterPage_Auth({ onSuccess, onGoLogin }) {
             setLoading(false);
             return;
         }
-        const hash = await sha256(pass);
+        const hash = yield sha256(pass);
         const newUser = { id: 'U' + Date.now(), name: name.trim(), username: usernameLower, email: emailLower, lineId: lineLower,
             role: 'pending', status: 'pending', passHash: hash, createdAt: new Date().toISOString() };
         saveUsers([...users, newUser]);
         addAuditEntry({ user: usernameLower, action: 'register', module: 'ระบบ', detail: 'สมัครสมาชิกใหม่ — รอการอนุมัติ' });
         setLoading(false);
         onSuccess();
-    };
+    });
     return (React.createElement("div", { style: { minHeight: '100vh', background: 'linear-gradient(135deg,#1a5276 0%,#2e86c1 60%,#1a8a5e 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, fontFamily: "'Sarabun','Noto Sans Thai',sans-serif" } },
         React.createElement("div", { style: { width: '100%', maxWidth: 460 } },
             React.createElement("div", { style: { background: '#fff', borderRadius: 18, boxShadow: '0 20px 60px rgba(0,0,0,0.25)', padding: '36px 36px 30px', position: 'relative', overflow: 'hidden' } },
@@ -359,166 +370,176 @@ const supa = {
         return false;
     },
     // ── Generic fetch all rows from a table
-    async getAll(table) {
-        try {
-            const r = await fetch(`${SUPA_URL}/rest/v1/${table}?order=created_at.asc`, { headers: this.headers });
-            if (!r.ok) {
-                console.error(`getAll ${table}:`, await r.text());
+    getAll(table) {
+        return __awaiter(this, void 0, void 0, function* () {
+            try {
+                const r = yield fetch(`${SUPA_URL}/rest/v1/${table}?order=created_at.asc`, { headers: this.headers });
+                if (!r.ok) {
+                    console.error(`getAll ${table}:`, yield r.text());
+                    return null;
+                }
+                return r.json();
+            }
+            catch (e) {
+                console.error(`getAll ${table} network error:`, e);
                 return null;
             }
-            return r.json();
-        }
-        catch (e) {
-            console.error(`getAll ${table} network error:`, e);
-            return null;
-        }
+        });
     },
     // ── INSERT a single row (POST), retry on column mismatch up to 10 times
-    async insert(table, data, _depth) {
-        _depth = _depth || 0;
-        const body = this._strip(table, data);
-        try {
-            const r = await fetch(`${SUPA_URL}/rest/v1/${table}`, {
-                method: "POST",
-                headers: Object.assign(Object.assign({}, this.headers), { "Prefer": "return=representation" }),
-                body: JSON.stringify(body),
-            });
-            if (!r.ok) {
-                const errText = await r.text();
-                console.error(`insert ${table} [HTTP ${r.status}]:`, errText);
-                if (this._isRlsError(r.status, errText)) {
-                    console.error(`insert ${table}: RLS/permission error — add INSERT policy for anon role`);
-                    return 'RLS_ERROR';
-                }
-                if (_depth < 10 && this._learnBadCol(table, errText)) {
-                    return this.insert(table, data, _depth + 1);
-                }
-                return null;
-            }
-            return r.json();
-        }
-        catch (e) {
-            console.error(`insert ${table} network error:`, e);
-            return null;
-        }
-    },
-    // ── PATCH (update) by primary key, retry on column mismatch
-    async patch(table, pkCol, pkVal, data, _depth) {
-        _depth = _depth || 0;
-        const body = this._strip(table, data);
-        try {
-            const r = await fetch(`${SUPA_URL}/rest/v1/${table}?${pkCol}=eq.${pkVal}`, {
-                method: "PATCH",
-                headers: Object.assign(Object.assign({}, this.headers), { "Prefer": "return=representation" }),
-                body: JSON.stringify(body),
-            });
-            if (!r.ok) {
-                const errText = await r.text();
-                console.error(`patch ${table} [HTTP ${r.status}]:`, errText);
-                if (this._isRlsError(r.status, errText)) {
-                    console.error(`patch ${table}: RLS/permission error — add UPDATE policy for anon role`);
-                    return 'RLS_ERROR';
-                }
-                if (_depth < 10 && this._learnBadCol(table, errText)) {
-                    return this.patch(table, pkCol, pkVal, data, _depth + 1);
-                }
-                return null;
-            }
-            return r.json();
-        }
-        catch (e) {
-            console.error(`patch ${table} network error:`, e);
-            return null;
-        }
-    },
-    // ── Upsert: try INSERT first; if 409 conflict → PATCH instead
-    // Also handles bulk arrays (for seed data) via old merge-duplicates method
-    async upsert(table, data, _depth) {
-        _depth = _depth || 0;
-        // Bulk array path — use merge-duplicates as before
-        if (Array.isArray(data)) {
-            const body = data.map(row => this._strip(table, row));
+    insert(table, data, _depth) {
+        return __awaiter(this, void 0, void 0, function* () {
+            _depth = _depth || 0;
+            const body = this._strip(table, data);
             try {
-                const r = await fetch(`${SUPA_URL}/rest/v1/${table}`, {
+                const r = yield fetch(`${SUPA_URL}/rest/v1/${table}`, {
                     method: "POST",
-                    headers: Object.assign(Object.assign({}, this.headers), { "Prefer": "resolution=merge-duplicates,return=representation" }),
+                    headers: Object.assign(Object.assign({}, this.headers), { "Prefer": "return=representation" }),
                     body: JSON.stringify(body),
                 });
                 if (!r.ok) {
-                    const errText = await r.text();
-                    console.error(`upsert[] ${table} [HTTP ${r.status}]:`, errText);
+                    const errText = yield r.text();
+                    console.error(`insert ${table} [HTTP ${r.status}]:`, errText);
+                    if (this._isRlsError(r.status, errText)) {
+                        console.error(`insert ${table}: RLS/permission error — add INSERT policy for anon role`);
+                        return 'RLS_ERROR';
+                    }
                     if (_depth < 10 && this._learnBadCol(table, errText)) {
-                        return this.upsert(table, data, _depth + 1);
+                        return this.insert(table, data, _depth + 1);
                     }
                     return null;
                 }
                 return r.json();
             }
             catch (e) {
-                console.error(`upsert[] ${table} network:`, e);
+                console.error(`insert ${table} network error:`, e);
                 return null;
             }
-        }
-        // Single-row path: INSERT → on conflict (409 / 23505) → PATCH
-        const body = this._strip(table, data);
-        try {
-            const r = await fetch(`${SUPA_URL}/rest/v1/${table}`, {
-                method: "POST",
-                headers: Object.assign(Object.assign({}, this.headers), { "Prefer": "return=representation" }),
-                body: JSON.stringify(body),
-            });
-            if (r.ok)
-                return r.json();
-            const errText = await r.text();
-            console.error(`upsert ${table} [HTTP ${r.status}]:`, errText);
-            // RLS / permission error
-            if (this._isRlsError(r.status, errText)) {
-                console.error(`upsert ${table}: RLS/permission error — add policy for anon role`);
-                return 'RLS_ERROR';
-            }
-            // Unknown column → strip and retry insert
-            if (_depth < 10 && this._learnBadCol(table, errText)) {
-                return this.upsert(table, data, _depth + 1);
-            }
-            // Duplicate key (23505) or HTTP 409 → fall back to PATCH
-            let errObj = null;
+        });
+    },
+    // ── PATCH (update) by primary key, retry on column mismatch
+    patch(table, pkCol, pkVal, data, _depth) {
+        return __awaiter(this, void 0, void 0, function* () {
+            _depth = _depth || 0;
+            const body = this._strip(table, data);
             try {
-                errObj = JSON.parse(errText);
+                const r = yield fetch(`${SUPA_URL}/rest/v1/${table}?${pkCol}=eq.${pkVal}`, {
+                    method: "PATCH",
+                    headers: Object.assign(Object.assign({}, this.headers), { "Prefer": "return=representation" }),
+                    body: JSON.stringify(body),
+                });
+                if (!r.ok) {
+                    const errText = yield r.text();
+                    console.error(`patch ${table} [HTTP ${r.status}]:`, errText);
+                    if (this._isRlsError(r.status, errText)) {
+                        console.error(`patch ${table}: RLS/permission error — add UPDATE policy for anon role`);
+                        return 'RLS_ERROR';
+                    }
+                    if (_depth < 10 && this._learnBadCol(table, errText)) {
+                        return this.patch(table, pkCol, pkVal, data, _depth + 1);
+                    }
+                    return null;
+                }
+                return r.json();
             }
-            catch (_) { }
-            const pgCode = (errObj === null || errObj === void 0 ? void 0 : errObj.code) || '';
-            if (r.status === 409 || pgCode === '23505') {
-                console.warn(`upsert ${table}: conflict on insert, falling back to PATCH`);
-                const pkCol = 'id';
-                const pkVal = data[pkCol];
-                if (pkVal !== undefined) {
-                    return this.patch(table, pkCol, pkVal, data);
+            catch (e) {
+                console.error(`patch ${table} network error:`, e);
+                return null;
+            }
+        });
+    },
+    // ── Upsert: try INSERT first; if 409 conflict → PATCH instead
+    // Also handles bulk arrays (for seed data) via old merge-duplicates method
+    upsert(table, data, _depth) {
+        return __awaiter(this, void 0, void 0, function* () {
+            _depth = _depth || 0;
+            // Bulk array path — use merge-duplicates as before
+            if (Array.isArray(data)) {
+                const body = data.map(row => this._strip(table, row));
+                try {
+                    const r = yield fetch(`${SUPA_URL}/rest/v1/${table}`, {
+                        method: "POST",
+                        headers: Object.assign(Object.assign({}, this.headers), { "Prefer": "resolution=merge-duplicates,return=representation" }),
+                        body: JSON.stringify(body),
+                    });
+                    if (!r.ok) {
+                        const errText = yield r.text();
+                        console.error(`upsert[] ${table} [HTTP ${r.status}]:`, errText);
+                        if (_depth < 10 && this._learnBadCol(table, errText)) {
+                            return this.upsert(table, data, _depth + 1);
+                        }
+                        return null;
+                    }
+                    return r.json();
+                }
+                catch (e) {
+                    console.error(`upsert[] ${table} network:`, e);
+                    return null;
                 }
             }
-            console.error(`upsert ${table} pg_error: code=${pgCode} msg=${(errObj === null || errObj === void 0 ? void 0 : errObj.message) || errText}`);
-            return null;
-        }
-        catch (e) {
-            console.error(`upsert ${table} network:`, e);
-            return null;
-        }
+            // Single-row path: INSERT → on conflict (409 / 23505) → PATCH
+            const body = this._strip(table, data);
+            try {
+                const r = yield fetch(`${SUPA_URL}/rest/v1/${table}`, {
+                    method: "POST",
+                    headers: Object.assign(Object.assign({}, this.headers), { "Prefer": "return=representation" }),
+                    body: JSON.stringify(body),
+                });
+                if (r.ok)
+                    return r.json();
+                const errText = yield r.text();
+                console.error(`upsert ${table} [HTTP ${r.status}]:`, errText);
+                // RLS / permission error
+                if (this._isRlsError(r.status, errText)) {
+                    console.error(`upsert ${table}: RLS/permission error — add policy for anon role`);
+                    return 'RLS_ERROR';
+                }
+                // Unknown column → strip and retry insert
+                if (_depth < 10 && this._learnBadCol(table, errText)) {
+                    return this.upsert(table, data, _depth + 1);
+                }
+                // Duplicate key (23505) or HTTP 409 → fall back to PATCH
+                let errObj = null;
+                try {
+                    errObj = JSON.parse(errText);
+                }
+                catch (_) { }
+                const pgCode = (errObj === null || errObj === void 0 ? void 0 : errObj.code) || '';
+                if (r.status === 409 || pgCode === '23505') {
+                    console.warn(`upsert ${table}: conflict on insert, falling back to PATCH`);
+                    const pkCol = 'id';
+                    const pkVal = data[pkCol];
+                    if (pkVal !== undefined) {
+                        return this.patch(table, pkCol, pkVal, data);
+                    }
+                }
+                console.error(`upsert ${table} pg_error: code=${pgCode} msg=${(errObj === null || errObj === void 0 ? void 0 : errObj.message) || errText}`);
+                return null;
+            }
+            catch (e) {
+                console.error(`upsert ${table} network:`, e);
+                return null;
+            }
+        });
     },
     // ── Delete by primary key
-    async delete(table, pkCol, pkVal) {
-        try {
-            const r = await fetch(`${SUPA_URL}/rest/v1/${table}?${pkCol}=eq.${pkVal}`, {
-                method: "DELETE", headers: this.headers,
-            });
-            if (!r.ok) {
-                console.error(`delete ${table}:`, await r.text());
+    delete(table, pkCol, pkVal) {
+        return __awaiter(this, void 0, void 0, function* () {
+            try {
+                const r = yield fetch(`${SUPA_URL}/rest/v1/${table}?${pkCol}=eq.${pkVal}`, {
+                    method: "DELETE", headers: this.headers,
+                });
+                if (!r.ok) {
+                    console.error(`delete ${table}:`, yield r.text());
+                    return false;
+                }
+                return true;
+            }
+            catch (e) {
+                console.error(`delete ${table} network:`, e);
                 return false;
             }
-            return true;
-        }
-        catch (e) {
-            console.error(`delete ${table} network:`, e);
-            return false;
-        }
+        });
     },
 };
 // DB row → app shape converters (snake_case ↔ camelCase for visits/receipts)
@@ -546,16 +567,33 @@ const toDbVisit = (v) => ({
     status: v.status || 'รอตรวจ',
     queue_no: v.queueNo || '',
 });
-const fromDbReceipt = (r) => r ? ({
-    id: r.id, hn: r.hn, visitId: r.visit_id, patname: r.patname, date: r.date,
-    items: Array.isArray(r.items) ? r.items : (() => { try {
-        return r.items ? JSON.parse(r.items) : [];
+const fromDbReceipt = (r) => {
+    if (!r)
+        return null;
+    // Parse items — Supabase may return jsonb as already-parsed array or as a JSON string
+    let items = [];
+    if (Array.isArray(r.items)) {
+        items = r.items;
     }
-    catch (_) {
-        return [];
-    } })(),
-    discount: r.discount || 0, paid: r.paid || 'เงินสด', status: r.status || 'รอชำระ',
-}) : null;
+    else if (r.items) {
+        try {
+            items = JSON.parse(r.items);
+        }
+        catch (_) {
+            items = [];
+        }
+    }
+    // Ensure each item has numeric qty/price (DB may return strings)
+    items = items.map(it => (Object.assign(Object.assign({}, it), { qty: Number(it.qty) || 0, price: Number(it.price) || 0 })));
+    // If status column doesn't exist in DB, r.status === undefined/null.
+    // Treat missing status as 'ชำระแล้ว' (legacy receipts were all paid),
+    // but only 'รอชำระ' when explicitly set to that value.
+    const status = (r.status === 'รอชำระ') ? 'รอชำระ' : (r.status || 'ชำระแล้ว');
+    return {
+        id: r.id, hn: r.hn, visitId: r.visit_id, patname: r.patname, date: r.date,
+        items, discount: Number(r.discount) || 0, paid: r.paid || 'เงินสด', status,
+    };
+};
 const toDbReceipt = (r) => ({
     id: r.id, hn: r.hn, visit_id: r.visitId || '', patname: r.patname || '',
     date: r.date, items: r.items || [], discount: r.discount || 0,
@@ -796,10 +834,10 @@ function ClinicDashboard({ session, onLogout }) {
     // ── Load all data from Supabase on mount
     useEffect(() => {
         let cancelled = false;
-        const load = async () => {
+        const load = () => __awaiter(this, void 0, void 0, function* () {
             setLoading(true);
             try {
-                const [pts, vis, apps, recs, meds, svcs] = await Promise.all([
+                const [pts, vis, apps, recs, meds, svcs] = yield Promise.all([
                     supa.getAll('patients'),
                     supa.getAll('visits'),
                     supa.getAll('appointments'),
@@ -846,7 +884,7 @@ function ClinicDashboard({ session, onLogout }) {
                 if (!cancelled)
                     setLoading(false);
             }
-        };
+        });
         load();
         return () => { cancelled = true; };
     }, []);
@@ -854,29 +892,29 @@ function ClinicDashboard({ session, onLogout }) {
     useEffect(() => {
         if (!dbReady)
             return;
-        const seed = async () => {
-            const pts = await supa.getAll('patients');
+        const seed = () => __awaiter(this, void 0, void 0, function* () {
+            const pts = yield supa.getAll('patients');
             if (pts && pts.length === 0) {
-                await supa.upsert('patients', SAMPLE_PATIENTS);
-                await supa.upsert('medicines', SAMPLE_MEDICINES);
-                await supa.upsert('treatment_services', SAMPLE_SERVICES);
+                yield supa.upsert('patients', SAMPLE_PATIENTS);
+                yield supa.upsert('medicines', SAMPLE_MEDICINES);
+                yield supa.upsert('treatment_services', SAMPLE_SERVICES);
                 console.log('Sample data seeded to DB');
             }
-        };
+        });
         seed();
     }, [dbReady]);
     // ── CRUD helpers that update both state and DB
-    const savePatient = async (p) => {
+    const savePatient = (p) => __awaiter(this, void 0, void 0, function* () {
         const existed = patients.some(x => x.hn === p.hn);
         setPatients(prev => {
             const exists = prev.find(x => x.hn === p.hn);
             return exists ? prev.map(x => x.hn === p.hn ? p : x) : [...prev, p];
         });
-        await supa.upsert('patients', p);
+        yield supa.upsert('patients', p);
         addAuditEntry({ user: (session === null || session === void 0 ? void 0 : session.username) || (session === null || session === void 0 ? void 0 : session.name), action: existed ? 'edit' : 'create',
             module: 'เวชระเบียน', detail: `${existed ? 'แก้ไข' : 'เพิ่ม'}ข้อมูลผู้ป่วย HN ${p.hn} — ${p.name}` });
-    };
-    const saveVisit = async (v) => {
+    });
+    const saveVisit = (v) => __awaiter(this, void 0, void 0, function* () {
         // Check BEFORE setState — setState updater runs async so can't rely on closure var
         const existedInDb = visits.some(x => x.id === v.id);
         setVisits(prev => {
@@ -886,17 +924,17 @@ function ClinicDashboard({ session, onLogout }) {
         const dbRow = toDbVisit(v);
         let result;
         if (existedInDb) {
-            result = await supa.patch('visits', 'id', v.id, dbRow);
+            result = yield supa.patch('visits', 'id', v.id, dbRow);
             if (result === null) {
                 console.warn('saveVisit: PATCH failed, trying INSERT');
-                result = await supa.insert('visits', dbRow);
+                result = yield supa.insert('visits', dbRow);
             }
         }
         else {
-            result = await supa.insert('visits', dbRow);
+            result = yield supa.insert('visits', dbRow);
             if (result === null) {
                 console.warn('saveVisit: INSERT failed, trying PATCH');
-                result = await supa.patch('visits', 'id', v.id, dbRow);
+                result = yield supa.patch('visits', 'id', v.id, dbRow);
             }
         }
         if (result === 'RLS_ERROR') {
@@ -908,75 +946,75 @@ function ClinicDashboard({ session, onLogout }) {
             setSaveError(true);
         }
         return result;
-    };
-    const deleteVisit = async (id) => {
+    });
+    const deleteVisit = (id) => __awaiter(this, void 0, void 0, function* () {
         if (!window.confirm('⚠️ ยืนยันลบประวัติการตรวจนี้?\nการลบจะลบประวัติออกจากฐานข้อมูลถาวร ไม่สามารถกู้คืนได้'))
             return;
         setVisits(prev => prev.filter(v => v.id !== id));
-        await supa.delete('visits', 'id', id);
+        yield supa.delete('visits', 'id', id);
         addAuditEntry({ user: (session === null || session === void 0 ? void 0 : session.username) || (session === null || session === void 0 ? void 0 : session.name), action: 'delete', module: 'ตรวจรักษา', detail: `ลบประวัติการตรวจ ID ${id}` });
-    };
-    const saveReceipt = async (r) => {
+    });
+    const saveReceipt = (r) => __awaiter(this, void 0, void 0, function* () {
         setReceipts(prev => [...prev, r]);
-        await supa.upsert('receipts', toDbReceipt(r));
+        yield supa.upsert('receipts', toDbReceipt(r));
         addAuditEntry({ user: (session === null || session === void 0 ? void 0 : session.username) || (session === null || session === void 0 ? void 0 : session.name), action: 'create', module: 'ใบเสร็จ', detail: `สร้างใบเสร็จ ${r.id} ผู้ป่วย HN ${r.hn}` });
-    };
+    });
     // Update an existing receipt (e.g. confirm payment / change payment method)
-    const updateReceipt = async (r) => {
+    const updateReceipt = (r) => __awaiter(this, void 0, void 0, function* () {
         setReceipts(prev => prev.map(x => x.id === r.id ? r : x));
-        await supa.upsert('receipts', toDbReceipt(r));
-    };
-    const deleteReceipt = async (id) => {
+        yield supa.upsert('receipts', toDbReceipt(r));
+    });
+    const deleteReceipt = (id) => __awaiter(this, void 0, void 0, function* () {
         if (!window.confirm('ยืนยันลบใบเสร็จนี้?\nการลบใบเสร็จจะไม่กระทบต่อประวัติการรักษาของผู้ป่วย'))
             return;
         setReceipts(prev => prev.filter(x => x.id !== id));
-        await supa.delete('receipts', 'id', id);
+        yield supa.delete('receipts', 'id', id);
         addAuditEntry({ user: (session === null || session === void 0 ? void 0 : session.username) || (session === null || session === void 0 ? void 0 : session.name), action: 'delete', module: 'ใบเสร็จ', detail: `ลบใบเสร็จ ID ${id}` });
-    };
-    const saveAppointment = async (a) => {
+    });
+    const saveAppointment = (a) => __awaiter(this, void 0, void 0, function* () {
         const existed = appointments.some(x => x.id === a.id);
         setAppointments(prev => {
             const exists = prev.find(x => x.id === a.id);
             return exists ? prev.map(x => x.id === a.id ? a : x) : [...prev, a];
         });
-        await supa.upsert('appointments', a);
+        yield supa.upsert('appointments', a);
         addAuditEntry({ user: (session === null || session === void 0 ? void 0 : session.username) || (session === null || session === void 0 ? void 0 : session.name), action: existed ? 'edit' : 'create', module: 'นัดหมาย', detail: `${existed ? 'แก้ไข' : 'เพิ่ม'}นัดหมาย ${a.id} HN ${a.hn}` });
-    };
-    const deleteAppointment = async (id) => {
+    });
+    const deleteAppointment = (id) => __awaiter(this, void 0, void 0, function* () {
         setAppointments(prev => prev.filter(a => a.id !== id));
-        await supa.delete('appointments', 'id', id);
+        yield supa.delete('appointments', 'id', id);
         addAuditEntry({ user: (session === null || session === void 0 ? void 0 : session.username) || (session === null || session === void 0 ? void 0 : session.name), action: 'delete', module: 'นัดหมาย', detail: `ลบนัดหมาย ID ${id}` });
-    };
-    const saveMedicine = async (m) => {
+    });
+    const saveMedicine = (m) => __awaiter(this, void 0, void 0, function* () {
         const existed = medicines.some(x => x.id === m.id);
         setMedicines(prev => {
             const exists = prev.find(x => x.id === m.id);
             return exists ? prev.map(x => x.id === m.id ? m : x) : [...prev, m];
         });
-        await supa.upsert('medicines', m);
+        yield supa.upsert('medicines', m);
         addAuditEntry({ user: (session === null || session === void 0 ? void 0 : session.username) || (session === null || session === void 0 ? void 0 : session.name), action: existed ? 'edit' : 'create', module: 'คลังยา', detail: `${existed ? 'แก้ไข' : 'เพิ่ม'}ยา ${m.name}` });
-    };
-    const deleteMedicine = async (id) => {
+    });
+    const deleteMedicine = (id) => __awaiter(this, void 0, void 0, function* () {
         const m = medicines.find(x => x.id === id);
         setMedicines(prev => prev.filter(m => m.id !== id));
-        await supa.delete('medicines', 'id', id);
+        yield supa.delete('medicines', 'id', id);
         addAuditEntry({ user: (session === null || session === void 0 ? void 0 : session.username) || (session === null || session === void 0 ? void 0 : session.name), action: 'delete', module: 'คลังยา', detail: `ลบยา ${(m === null || m === void 0 ? void 0 : m.name) || id}` });
-    };
-    const patchMedicineStock = async (medId, newStock) => {
+    });
+    const patchMedicineStock = (medId, newStock) => __awaiter(this, void 0, void 0, function* () {
         setMedicines(prev => prev.map(m => m.id === medId ? Object.assign(Object.assign({}, m), { stock: newStock }) : m));
-        await supa.patch('medicines', 'id', medId, { stock: newStock });
-    };
-    const saveTreatmentService = async (s) => {
+        yield supa.patch('medicines', 'id', medId, { stock: newStock });
+    });
+    const saveTreatmentService = (s) => __awaiter(this, void 0, void 0, function* () {
         setTreatmentServices(prev => {
             const exists = prev.find(x => x.id === s.id);
             return exists ? prev.map(x => x.id === s.id ? s : x) : [...prev, s];
         });
-        await supa.upsert('treatment_services', s);
-    };
-    const deleteTreatmentService = async (id) => {
+        yield supa.upsert('treatment_services', s);
+    });
+    const deleteTreatmentService = (id) => __awaiter(this, void 0, void 0, function* () {
         setTreatmentServices(prev => prev.filter(s => s.id !== id));
-        await supa.delete('treatment_services', 'id', id);
-    };
+        yield supa.delete('treatment_services', 'id', id);
+    });
     // ── ID generators (based on current state length for uniqueness)
     const nextHN = () => pad(patients.length + 1);
     const nextVID = () => { const ts = Date.now(); return `V${ts}${Math.floor(Math.random() * 100)}`; };
@@ -990,7 +1028,9 @@ function ClinicDashboard({ session, onLogout }) {
     const todayAppoints = appointments.filter(a => a.date === todayStr).length;
     const lowStock = medicines.filter(m => m.stock <= m.minstock).length;
     const monthReceipts = receipts.filter(r => r.date && r.date.startsWith(todayStr.slice(0, 7)));
-    const monthRevenue = monthReceipts.reduce((s, r) => {
+    const monthRevenue = monthReceipts
+        .filter(r => r.status === 'ชำระแล้ว')
+        .reduce((s, r) => {
         const total = (r.items || []).reduce((t, i) => t + (Number(i.qty) || 0) * (Number(i.price) || 0), 0) - (Number(r.discount) || 0);
         return s + total;
     }, 0);
@@ -1781,20 +1821,20 @@ function RegisterPage({ patients, savePatient, visits, saveVisit, deleteVisit, n
         return (p.fname || '').toLowerCase().includes(q) || (p.lname || '').toLowerCase().includes(q) ||
             (p.hn || '').includes(q) || (p.idcard || '').includes(q) || (p.tel || '').includes(q);
     });
-    const saveNewPatient = async () => {
+    const saveNewPatient = () => __awaiter(this, void 0, void 0, function* () {
         if (!form.fname.trim() || !form.lname.trim()) {
             alert('กรุณากรอกชื่อและนามสกุล');
             return;
         }
         const hn = nextHN();
         const newP = Object.assign(Object.assign({}, form), { hn, created_at: new Date().toISOString() });
-        await savePatient(newP);
+        yield savePatient(newP);
         const hasIntake = Object.values(intake).some(v => v && String(v).trim());
         let visitId = null;
         if (hasIntake && saveVisit && nextVID) {
             const vid = nextVID();
             visitId = vid;
-            await saveVisit({
+            yield saveVisit({
                 id: vid, hn, date: today(),
                 cc: intake.cc || '', pi: '', pe: '', dx: '', tx: '',
                 drugs: [], services: [],
@@ -1809,10 +1849,10 @@ function RegisterPage({ patients, savePatient, visits, saveVisit, deleteVisit, n
         setForm({ prefix: 'นาย', fname: '', lname: '', gender: 'ชาย', dob: '', idcard: '', tel: '', lineId: '', address: '', bloodtype: '', allergy: '', chronic: '', currentmed: '', email: '', occupation: '', emcontact: '', emtel: '' });
         setIntake({ cc: '', temp: '', bp_sys: '', bp_dia: '', pr: '', rr: '', o2: '', weight: '', height: '', nurse: '' });
         setSubpage('registered');
-    };
+    });
     const age = (dob) => { if (!dob)
         return '-'; return Math.floor((new Date() - new Date(dob)) / (365.25 * 24 * 60 * 60 * 1000)) + ' ปี'; };
-    const bmi = intake.weight && intake.height ? (intake.weight / ((intake.height / 100) ** 2)).toFixed(1) : null;
+    const bmi = intake.weight && intake.height ? (intake.weight / (Math.pow((intake.height / 100), 2))).toFixed(1) : null;
     const bmiLabel = bmi ? (bmi < 18.5 ? 'น้ำหนักน้อย' : bmi < 23 ? 'ปกติ' : bmi < 25 ? 'ท้วม' : bmi < 30 ? 'อ้วน' : 'อ้วนมาก') : '';
     return (React.createElement("div", null,
         React.createElement("div", { style: { display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 } },
@@ -2006,7 +2046,7 @@ function PatientDetail({ pat, visits, onBack, patients, savePatient, treatmentSe
     const fi = (k, v) => setIntake(prev => (Object.assign(Object.assign({}, prev), { [k]: v })));
     const age = (dob) => { if (!dob)
         return '-'; const d = new Date() - new Date(dob); return Math.floor(d / (365.25 * 24 * 60 * 60 * 1000)) + ' ปี'; };
-    const save = async () => { await savePatient(form); setEditing(false); alert('บันทึกข้อมูลเรียบร้อย'); };
+    const save = () => __awaiter(this, void 0, void 0, function* () { yield savePatient(form); setEditing(false); alert('บันทึกข้อมูลเรียบร้อย'); });
     // ── Visit pagination & inline edit
     const VISITS_PER_PAGE = 3;
     const [visitPage, setVisitPage] = useState(1);
@@ -2018,20 +2058,20 @@ function PatientDetail({ pat, visits, onBack, patients, savePatient, treatmentSe
     const pagedVisits = sortedVisits.slice((visitPage - 1) * VISITS_PER_PAGE, visitPage * VISITS_PER_PAGE);
     const startEditVisit = (v) => { setEditingVisit(v.id); setEditVform(Object.assign({}, v)); };
     const cancelEditVisit = () => { setEditingVisit(null); setEditVform(null); };
-    const saveEditVisit = async () => {
+    const saveEditVisit = () => __awaiter(this, void 0, void 0, function* () {
         if (!saveVisit) {
             alert('ไม่สามารถบันทึกได้');
             return;
         }
-        await saveVisit(editVform);
+        yield saveVisit(editVform);
         alert('✅ บันทึกการแก้ไขเรียบร้อย');
         setEditingVisit(null);
         setEditVform(null);
-    };
+    });
     // Count how many queues this patient already has today, to assign next sequence number
     const todayStr = today();
     const todaysVisitsForPat = (allVisits || visits).filter(v => v.hn === pat.hn && v.date === todayStr);
-    const createNewQueue = async () => {
+    const createNewQueue = () => __awaiter(this, void 0, void 0, function* () {
         if (!saveVisit || !nextVID) {
             alert('ไม่สามารถสร้างคิวใหม่ได้ในขณะนี้');
             return;
@@ -2046,12 +2086,12 @@ function PatientDetail({ pat, visits, onBack, patients, savePatient, treatmentSe
             o2: intake.o2 || '', weight: intake.weight || '', height: intake.height || '',
             nurse: intake.nurse || '', note: 'บันทึกโดยพยาบาลตอนลงทะเบียน (Visit ใหม่)',
         };
-        await saveVisit(v);
+        yield saveVisit(v);
         const qNum = String(todaysVisitsForPat.length + 1).padStart(3, '0') + '-' + pat.hn.slice(-3);
         setNewQueueResult({ qNum, cc: intake.cc, visitId: vid });
         setIntake({ cc: '', temp: '', bp_sys: '', bp_dia: '', pr: '', rr: '', o2: '', weight: '', height: '', nurse: '' });
-    };
-    const bmi = intake.weight && intake.height ? (intake.weight / ((intake.height / 100) ** 2)).toFixed(1) : null;
+    });
+    const bmi = intake.weight && intake.height ? (intake.weight / (Math.pow((intake.height / 100), 2))).toFixed(1) : null;
     return (React.createElement("div", null,
         React.createElement("div", { style: { display: 'flex', gap: 10, alignItems: 'center', marginBottom: 14, flexWrap: 'wrap' } },
             React.createElement("button", { className: "btn btn-gray btn-sm", onClick: onBack }, "\u2190 \u0E01\u0E25\u0E31\u0E1A"),
@@ -2168,13 +2208,13 @@ function PatientDetail({ pat, visits, onBack, patients, savePatient, treatmentSe
                                 React.createElement("button", { className: "btn btn-accent btn-sm no-print", onClick: saveEditVisit }, "\uD83D\uDCBE \u0E1A\u0E31\u0E19\u0E17\u0E36\u0E01"))
                             : React.createElement("button", { className: "btn btn-outline btn-sm no-print", onClick: () => startEditVisit(v) }, "\u270F\uFE0F \u0E41\u0E01\u0E49\u0E44\u0E02")),
                         React.createElement("button", { className: "btn btn-print btn-sm no-print", onClick: () => doPrint(`visit-card-${v.id}`, 'บันทึกการตรวจ Visit ' + v.id) }, "\uD83D\uDDA8\uFE0F \u0E1E\u0E34\u0E21\u0E1E\u0E4C"),
-                        deleteVisit && editingVisit !== v.id && (React.createElement("button", { className: "btn btn-sm no-print", style: { background: '#e74c3c', color: '#fff', border: 'none', minWidth: 54 }, title: "\u0E25\u0E1A\u0E1B\u0E23\u0E30\u0E27\u0E31\u0E15\u0E34\u0E01\u0E32\u0E23\u0E15\u0E23\u0E27\u0E08\u0E19\u0E35\u0E49", onClick: async () => {
+                        deleteVisit && editingVisit !== v.id && (React.createElement("button", { className: "btn btn-sm no-print", style: { background: '#e74c3c', color: '#fff', border: 'none', minWidth: 54 }, title: "\u0E25\u0E1A\u0E1B\u0E23\u0E30\u0E27\u0E31\u0E15\u0E34\u0E01\u0E32\u0E23\u0E15\u0E23\u0E27\u0E08\u0E19\u0E35\u0E49", onClick: () => __awaiter(this, void 0, void 0, function* () {
                                 if (!window.confirm(`⚠️ ลบประวัติการตรวจนี้?\n\nVisit ID: ${v.id}\nวันที่: ${thaiDate(v.date)}${v.cc ? '  CC: ' + v.cc : ''}\n\nไม่สามารถกู้คืนได้`))
                                     return;
-                                await deleteVisit(v.id);
+                                yield deleteVisit(v.id);
                                 if (visitPage > 1 && pagedVisits.length === 1)
                                     setVisitPage(p => Math.max(1, p - 1));
-                            } }, "\uD83D\uDDD1\uFE0F \u0E25\u0E1A")))),
+                            }) }, "\uD83D\uDDD1\uFE0F \u0E25\u0E1A")))),
                 editingVisit === v.id && editVform
                     ? React.createElement(VisitRecord, { v: editVform, setV: setEditVform, pat: pat, readOnly: false, treatmentServices: treatmentServices })
                     : React.createElement(VisitRecord, { v: v, pat: pat, readOnly: true, treatmentServices: treatmentServices })))),
@@ -2221,7 +2261,7 @@ function ExaminePage({ patients, visits, saveVisit, nextVID, getPatient, getVisi
         setVform(Object.assign(Object.assign({}, v), { drugs: v.drugs || [], services: v.services || [] }));
         setSaved(false);
     };
-    const loadPatient = async (p) => {
+    const loadPatient = (p) => __awaiter(this, void 0, void 0, function* () {
         setSearchResults([]);
         setPat(p);
         // Only load a pending (unfinished) queue visit — never overwrite a completed visit
@@ -2244,10 +2284,10 @@ function ExaminePage({ patients, visits, saveVisit, nextVID, getPatient, getVisi
             setVform(newV);
             // Save to DB immediately — this ensures the visit exists in the database
             // before the doctor starts filling in data.
-            await saveVisit(newV);
+            yield saveVisit(newV);
         }
         setSaved(false);
-    };
+    });
     // ── Today's queue using the status field (set at Registration)
     // Falls back to dx/pe heuristic for legacy visits created before status field existed
     const todayQueue = visits
@@ -2260,12 +2300,12 @@ function ExaminePage({ patients, visits, saveVisit, nextVID, getPatient, getVisi
         .sort((a, b) => (b.id || '').localeCompare(a.id || ''))
         .map(v => ({ visit: v, pat: getPatient(v.hn) }))
         .filter(q => q.pat);
-    const save = async () => {
+    const save = () => __awaiter(this, void 0, void 0, function* () {
         const completed = Object.assign(Object.assign({}, vform), { status: 'ตรวจเสร็จ' });
         setVform(completed);
         setSaved(true);
         setLastVisit(completed);
-        const result = await saveVisit(completed);
+        const result = yield saveVisit(completed);
         if (result === null) {
             console.error('save: DB write failed');
             // rlsError is set by saveVisit if it detected a permissions issue
@@ -2273,10 +2313,10 @@ function ExaminePage({ patients, visits, saveVisit, nextVID, getPatient, getVisi
         else {
             alert('✅ บันทึกการตรวจเรียบร้อย\nย้ายผู้ป่วยไปที่ "ตรวจเสร็จแล้ว" แล้ว');
         }
-    };
+    });
     // Issues receipt + deducts stock + marks visit as ตรวจเสร็จ.
     // Payment method + "ชำระแล้ว" are finalized later at the Receipt page counter.
-    const issueReceiptOnly = async () => {
+    const issueReceiptOnly = () => __awaiter(this, void 0, void 0, function* () {
         const drugItems = (vform.drugs || []).map(d => ({
             desc: d.name, qty: d.qty, unit: d.unit, price: d.price, type: 'drug', medId: d.medId
         }));
@@ -2293,19 +2333,19 @@ function ExaminePage({ patients, visits, saveVisit, nextVID, getPatient, getVisi
             items: allItems.length > 0 ? allItems : [{ desc: 'ค่าตรวจรักษา', qty: 1, unit: 'ครั้ง', price: 300, type: 'service' }],
             discount: 0, paid: '', status: 'รอชำระ',
         };
-        await saveReceipt(r);
+        yield saveReceipt(r);
         // Deduct stock for dispensed drugs
         if (vform.drugs && vform.drugs.length > 0) {
             for (const med of medicines) {
                 const ordered = vform.drugs.filter(d => d.medId === med.id);
                 if (ordered.length === 0)
                     continue;
-                await patchMedicineStock(med.id, Math.max(0, med.stock - ordered.reduce((s, d) => s + Number(d.qty), 0)));
+                yield patchMedicineStock(med.id, Math.max(0, med.stock - ordered.reduce((s, d) => s + Number(d.qty), 0)));
             }
         }
         // Mark visit done and save full record
         const completed = Object.assign(Object.assign({}, vform), { status: 'ตรวจเสร็จ' });
-        const vResult = await saveVisit(completed);
+        const vResult = yield saveVisit(completed);
         if (vResult === null) {
             console.error('issueReceiptOnly: visit status save failed');
             // rlsError modal shown by saveVisit if it is a permissions issue
@@ -2314,7 +2354,7 @@ function ExaminePage({ patients, visits, saveVisit, nextVID, getPatient, getVisi
         setSaved(true);
         setLastVisit(completed);
         alert(`✅ ออกใบเสร็จ ${r.id} แล้ว — สถานะ "รอชำระ"\nยอดรวม: ${r.items.reduce((s, i) => s + i.qty * i.price, 0).toLocaleString()} บาท\n\nกรุณาแจ้งผู้ป่วยไปชำระเงินที่หน้า "ใบเสร็จรับเงิน"`);
-    };
+    });
     const age = (dob) => { if (!dob)
         return '-'; return Math.floor((new Date() - new Date(dob)) / (365.25 * 24 * 60 * 60 * 1000)) + ' ปี'; };
     return (React.createElement("div", null,
@@ -3530,14 +3570,14 @@ function ReceiptPaymentPanel({ r, pat, updateReceipt, deleteReceipt, onDeleted, 
     const isPending = r.status !== 'ชำระแล้ว';
     const total = items.reduce((s, it) => s + it.qty * it.price, 0) - Number(discount);
     const updItem = (i, k, v) => setItems(prev => prev.map((it, idx) => idx === i ? Object.assign(Object.assign({}, it), { [k]: k === 'qty' || k === 'price' ? Number(v) : v }) : it));
-    const confirmPayment = async () => {
+    const confirmPayment = () => __awaiter(this, void 0, void 0, function* () {
         if (!window.confirm(`ยืนยันรับชำระเงิน ${total.toLocaleString()} บาท\nวิธีชำระ: ${paid}\n\nกดยืนยันเพื่อปิดบิล`))
             return;
         const updated = Object.assign(Object.assign({}, r), { items, discount: Number(discount), paid, status: 'ชำระแล้ว' });
-        await updateReceipt(updated);
+        yield updateReceipt(updated);
         onUpdated(updated);
         alert('✅ รับชำระเงินเรียบร้อย — ปิดบิลแล้ว');
-    };
+    });
     const docId = `receipt-doc-${r.id}`;
     return (React.createElement("div", null,
         isPending && (React.createElement("div", { className: "card no-print", style: { marginBottom: 14, background: '#fff8e1', border: '2px solid #f39c12' } },
@@ -3774,21 +3814,21 @@ function ReceiptQuickModal({ data, onClose, getPatient, nextRID, receipts, saveR
     // NOTE: payment method & "paid" confirmation now happen ONLY on the Receipt page
     // at the front counter. This modal just issues the receipt record (pending payment)
     // and deducts drug stock since the medication has physically been dispensed.
-    const save = async () => {
+    const save = () => __awaiter(this, void 0, void 0, function* () {
         const r = { id: nextRID(), hn: pat.hn, visitId: (visit === null || visit === void 0 ? void 0 : visit.id) || '', patname: pat.prefix + pat.fname + ' ' + pat.lname, date: today(), items, discount: Number(discount), paid: '', status: 'รอชำระ' };
-        await saveReceipt(r);
+        yield saveReceipt(r);
         for (const it of items) {
             if (it.type === 'drug') {
                 const med = it.medId
                     ? medicines.find(m => m.id === it.medId)
                     : medicines.find(m => it.desc.includes(m.name));
                 if (med)
-                    await patchMedicineStock(med.id, Math.max(0, med.stock - it.qty));
+                    yield patchMedicineStock(med.id, Math.max(0, med.stock - it.qty));
             }
         }
         alert(`ออกใบเสร็จ ${r.id} เรียบร้อย — สถานะ "รอชำระ"\n\nผู้ป่วยกรุณาไปชำระเงินที่เคาน์เตอร์ใบเสร็จ`);
         onClose();
-    };
+    });
     const drugTotal = items.filter(i => i.type === 'drug').reduce((s, i) => s + i.qty * i.price, 0);
     const svcTotal = items.filter(i => i.type !== 'drug').reduce((s, i) => s + i.qty * i.price, 0);
     return (React.createElement(Modal, { title: "\uD83E\uDDFE \u0E2D\u0E2D\u0E01\u0E43\u0E1A\u0E40\u0E2A\u0E23\u0E47\u0E08 (\u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E0A\u0E33\u0E23\u0E30)", onClose: onClose, width: 720 },
@@ -3878,14 +3918,14 @@ function AppointPage({ appointments, saveAppointment, deleteAppointment, patient
     }).sort((a, b) => a.date.localeCompare(b.date) || a.time.localeCompare(b.time));
     const todayCount = appointments.filter(a => a.date === today).length;
     const upCount = appointments.filter(a => a.date > today).length;
-    const save = async (f) => {
+    const save = (f) => __awaiter(this, void 0, void 0, function* () {
         const appt = f.id ? f : Object.assign(Object.assign({}, f), { id: nextAID() });
-        await saveAppointment(appt);
+        yield saveAppointment(appt);
         setEdit(null);
         setNewForm(null);
-    };
-    const del = async (id) => { if (window.confirm('ยืนยันลบการนัดหมายนี้?'))
-        await deleteAppointment(id); };
+    });
+    const del = (id) => __awaiter(this, void 0, void 0, function* () { if (window.confirm('ยืนยันลบการนัดหมายนี้?'))
+        yield deleteAppointment(id); });
     // Print a single appointment slip
     const printAppointSlip = (a) => {
         const pat = getPatient(a.hn);
@@ -4028,7 +4068,7 @@ function AppointQuickModal({ data, onClose, getPatient, appointments, saveAppoin
     const [form, setForm] = useState({ hn: pat.hn, patname: pat.prefix + pat.fname + ' ' + pat.lname, date: '', time: '09:00', reason: '', status: 'นัดแล้ว', note: '' });
     const f = (k, v) => setForm(prev => (Object.assign(Object.assign({}, prev), { [k]: v })));
     const slipId = 'appoint-slip-' + pat.hn;
-    const save = async () => { await saveAppointment(Object.assign(Object.assign({}, form), { id: nextAID() })); alert('บันทึกการนัดหมายเรียบร้อย'); onClose(); };
+    const save = () => __awaiter(this, void 0, void 0, function* () { yield saveAppointment(Object.assign(Object.assign({}, form), { id: nextAID() })); alert('บันทึกการนัดหมายเรียบร้อย'); onClose(); });
     return (React.createElement(Modal, { title: "\uD83D\uDCC5 \u0E1A\u0E31\u0E19\u0E17\u0E36\u0E01\u0E01\u0E32\u0E23\u0E19\u0E31\u0E14\u0E2B\u0E21\u0E32\u0E22", onClose: onClose, width: 540 },
         React.createElement("div", { style: { background: 'var(--primary-pale)', borderRadius: 6, padding: '8px 12px', marginBottom: 12, fontSize: 13 } },
             React.createElement("b", null,
@@ -4118,11 +4158,13 @@ function AccountingPage({ receipts, today }) {
     const filtIncome = receipts.filter(r => inRange(r.date));
     const filtExp = expenses.filter(e => inRange(e.date));
     const calcAmt = (r) => (r.items || []).reduce((t, i) => t + (Number(i.qty) || 0) * (Number(i.price) || 0), 0) - (Number(r.discount) || 0);
+    // totalIncome counts ALL receipts in range (including pending) for full picture
     const totalIncome = filtIncome.reduce((s, r) => s + calcAmt(r), 0);
+    // paidIncome = only confirmed paid — this is the real revenue
     const paidIncome = filtIncome.filter(r => r.status === 'ชำระแล้ว').reduce((s, r) => s + calcAmt(r), 0);
     const pendingIncome = totalIncome - paidIncome;
-    const totalExpense = filtExp.reduce((s, e) => s + e.amount, 0);
-    const netProfit = totalIncome - totalExpense;
+    const totalExpense = filtExp.reduce((s, e) => s + (Number(e.amount) || 0), 0);
+    const netProfit = paidIncome - totalExpense;
     const saveExp = (f) => {
         if (f.id && expenses.find(e => e.id === f.id)) {
             setExpenses(prev => prev.map(e => e.id === f.id ? f : e));
@@ -4157,6 +4199,24 @@ function AccountingPage({ receipts, today }) {
             React.createElement("div", { style: { marginLeft: 'auto', display: 'flex', gap: 8 } },
                 React.createElement("button", { className: "btn btn-print btn-sm no-print", onClick: () => doPrint('accounting-report', 'รายงานบัญชีรายรับ-รายจ่าย') }, "\uD83D\uDDA8\uFE0F \u0E1E\u0E34\u0E21\u0E1E\u0E4C\u0E23\u0E32\u0E22\u0E07\u0E32\u0E19"),
                 React.createElement("button", { className: "btn btn-accent btn-sm", onClick: () => setAddForm({ date: today, category: 'เวชภัณฑ์/ยา', desc: '', amount: 0 }) }, "+ \u0E40\u0E1E\u0E34\u0E48\u0E21\u0E23\u0E32\u0E22\u0E08\u0E48\u0E32\u0E22"))),
+        receipts.length > 0 && totalIncome === 0 && (React.createElement("div", { className: "no-print", style: { background: '#fff3cd', border: '1px solid #ffc107', borderRadius: 8, padding: '10px 14px', marginBottom: 12, fontSize: 12 } },
+            "\u26A0\uFE0F ",
+            React.createElement("strong", null,
+                "\u0E1E\u0E1A\u0E43\u0E1A\u0E40\u0E2A\u0E23\u0E47\u0E08 ",
+                receipts.length,
+                " \u0E23\u0E32\u0E22\u0E01\u0E32\u0E23\u0E41\u0E15\u0E48\u0E23\u0E32\u0E22\u0E23\u0E31\u0E1A\u0E41\u0E2A\u0E14\u0E07 0"),
+            " \u2014 \u0E2D\u0E32\u0E08\u0E40\u0E01\u0E34\u0E14\u0E08\u0E32\u0E01:",
+            React.createElement("ol", { style: { marginTop: 6, paddingLeft: 20 } },
+                React.createElement("li", null,
+                    "\u0E15\u0E32\u0E23\u0E32\u0E07 ",
+                    React.createElement("code", null, "receipts"),
+                    " \u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E21\u0E35\u0E04\u0E2D\u0E25\u0E31\u0E21\u0E19\u0E4C ",
+                    React.createElement("code", null, "status"),
+                    " \u0E2B\u0E23\u0E37\u0E2D ",
+                    React.createElement("code", null, "items"),
+                    " \u0E43\u0E19 Supabase \u2192 \u0E23\u0E31\u0E19 SQL \u0E14\u0E49\u0E32\u0E19\u0E25\u0E48\u0E32\u0E07\u0E41\u0E01\u0E49\u0E44\u0E02"),
+                React.createElement("li", null, "\u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25 items \u0E43\u0E19 DB \u0E40\u0E1B\u0E47\u0E19 text \u0E44\u0E21\u0E48\u0E43\u0E0A\u0E48 jsonb \u2192 \u0E23\u0E31\u0E19 SQL \u0E41\u0E1B\u0E25\u0E07 type")),
+            React.createElement("div", { style: { marginTop: 6, background: '#2d2d2d', color: '#f8f8f2', borderRadius: 6, padding: '8px 10px', fontFamily: 'monospace', fontSize: 11, whiteSpace: 'pre-wrap' } }, `-- วางใน Supabase SQL Editor แล้วกด Run:\nALTER TABLE receipts ADD COLUMN IF NOT EXISTS status text DEFAULT 'ชำระแล้ว';\nALTER TABLE receipts ADD COLUMN IF NOT EXISTS paid text DEFAULT 'เงินสด';\nALTER TABLE receipts ADD COLUMN IF NOT EXISTS discount numeric DEFAULT 0;\nALTER TABLE receipts ADD COLUMN IF NOT EXISTS patname text DEFAULT '';\nALTER TABLE receipts ADD COLUMN IF NOT EXISTS visit_id text DEFAULT '';\n-- แปลง items เป็น jsonb (ถ้ายังเป็น text):\nALTER TABLE receipts ALTER COLUMN items TYPE jsonb USING items::jsonb;\n-- เปิด RLS ให้ anon อ่าน-เขียนได้:\nALTER TABLE receipts ENABLE ROW LEVEL SECURITY;\nDROP POLICY IF EXISTS "anon_all" ON receipts;\nCREATE POLICY "anon_all" ON receipts FOR ALL TO anon USING (true) WITH CHECK (true);`))),
         React.createElement("div", { className: "card no-print", style: { marginBottom: 14 } },
             React.createElement("div", { style: { display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginBottom: 10 } },
                 React.createElement("span", { style: { fontWeight: 600, fontSize: 13 } }, "\u0E0A\u0E48\u0E27\u0E07\u0E40\u0E27\u0E25\u0E32:"),
@@ -4211,17 +4271,18 @@ function AccountingPage({ receipts, today }) {
                 React.createElement("div", { style: { textAlign: 'center', fontSize: 12, color: '#666', marginBottom: 12 } }, r0 === r1 ? thaiDate(r0) : `${thaiDate(r0)} — ${thaiDate(r1)}`)),
             React.createElement("div", { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(170px,1fr))', gap: 12, marginBottom: 16 } },
                 showType !== 'expense' && React.createElement("div", { className: "card", style: { textAlign: 'center', border: '2px solid var(--accent)' } },
-                    React.createElement("div", { style: { fontSize: 11, color: 'var(--accent)', fontWeight: 700, marginBottom: 4 } }, "\uD83D\uDCB0 \u0E23\u0E32\u0E22\u0E23\u0E31\u0E1A\u0E23\u0E27\u0E21"),
-                    React.createElement("div", { style: { fontSize: 22, fontWeight: 700, color: 'var(--accent)' } }, totalIncome.toLocaleString()),
+                    React.createElement("div", { style: { fontSize: 11, color: 'var(--accent)', fontWeight: 700, marginBottom: 4 } }, "\uD83D\uDCB0 \u0E23\u0E32\u0E22\u0E23\u0E31\u0E1A\u0E23\u0E27\u0E21 (\u0E0A\u0E33\u0E23\u0E30\u0E41\u0E25\u0E49\u0E27)"),
+                    React.createElement("div", { style: { fontSize: 22, fontWeight: 700, color: 'var(--accent)' } }, paidIncome.toLocaleString()),
                     React.createElement("div", { style: { fontSize: 11, color: 'var(--gray)' } },
                         "\u0E1A\u0E32\u0E17 (",
-                        filtIncome.length,
+                        filtIncome.filter(r => r.status === 'ชำระแล้ว').length,
                         " \u0E23\u0E32\u0E22\u0E01\u0E32\u0E23)"),
                     pendingIncome > 0 && React.createElement("div", { style: { fontSize: 10, marginTop: 4, color: '#e67e22' } },
-                        "\u0E0A\u0E33\u0E23\u0E30\u0E41\u0E25\u0E49\u0E27 ",
-                        paidIncome.toLocaleString(),
-                        " | \u0E23\u0E2D\u0E0A\u0E33\u0E23\u0E30 ",
-                        pendingIncome.toLocaleString())),
+                        "\u0E23\u0E2D\u0E0A\u0E33\u0E23\u0E30\u0E2D\u0E35\u0E01 ",
+                        pendingIncome.toLocaleString(),
+                        " \u0E1A\u0E32\u0E17 (",
+                        filtIncome.filter(r => r.status !== 'ชำระแล้ว').length,
+                        " \u0E23\u0E32\u0E22\u0E01\u0E32\u0E23)")),
                 showType !== 'income' && React.createElement("div", { className: "card", style: { textAlign: 'center', border: '2px solid var(--danger)' } },
                     React.createElement("div", { style: { fontSize: 11, color: 'var(--danger)', fontWeight: 700, marginBottom: 4 } }, "\uD83D\uDCB8 \u0E23\u0E32\u0E22\u0E08\u0E48\u0E32\u0E22\u0E23\u0E27\u0E21"),
                     React.createElement("div", { style: { fontSize: 22, fontWeight: 700, color: 'var(--danger)' } }, totalExpense.toLocaleString()),
@@ -4268,7 +4329,12 @@ function AccountingPage({ receipts, today }) {
                                 allRows.length,
                                 " \u0E23\u0E32\u0E22\u0E01\u0E32\u0E23)"),
                             React.createElement("td", { style: { padding: '9px 12px' } }),
-                            showType !== 'expense' && React.createElement("td", { style: { padding: '9px 12px', textAlign: 'right' } }, totalIncome.toLocaleString()),
+                            showType !== 'expense' && React.createElement("td", { style: { padding: '9px 12px', textAlign: 'right' } },
+                                paidIncome.toLocaleString(),
+                                pendingIncome > 0 && React.createElement("span", { style: { fontSize: 10, color: '#e67e22', marginLeft: 4 } },
+                                    "(+\u0E23\u0E2D ",
+                                    pendingIncome.toLocaleString(),
+                                    ")")),
                             showType !== 'income' && React.createElement("td", { style: { padding: '9px 12px', textAlign: 'right' } }, totalExpense.toLocaleString()),
                             showType === 'both' && React.createElement("td", { style: { padding: '9px 8px', textAlign: 'right', fontSize: 11 }, className: "no-print" },
                                 "\u0E01\u0E33\u0E44\u0E23: ",
@@ -4316,19 +4382,19 @@ function PharmacyPage({ medicines, saveMedicine, deleteMedicine, receipts, treat
         saveDrugTemplates(all);
         refreshTemplates();
     };
-    const saveService = async (f) => {
+    const saveService = (f) => __awaiter(this, void 0, void 0, function* () {
         const svc = f.id ? f : Object.assign(Object.assign({}, f), { id: 'S' + pad((treatmentServices || []).length + 1, 3), active: true });
-        await saveTreatmentService(svc);
+        yield saveTreatmentService(svc);
         setSvcEdit(null);
         setSvcAdding(false);
-    };
-    const delService = async (id) => { if (window.confirm('ยืนยันลบรายการหัตถการ?'))
-        await deleteTreatmentService(id); };
-    const toggleActive = async (id) => {
+    });
+    const delService = (id) => __awaiter(this, void 0, void 0, function* () { if (window.confirm('ยืนยันลบรายการหัตถการ?'))
+        yield deleteTreatmentService(id); });
+    const toggleActive = (id) => __awaiter(this, void 0, void 0, function* () {
         const svc = (treatmentServices || []).find(s => s.id === id);
         if (svc)
-            await saveTreatmentService(Object.assign(Object.assign({}, svc), { active: !svc.active }));
-    };
+            yield saveTreatmentService(Object.assign(Object.assign({}, svc), { active: !svc.active }));
+    });
     const cats = ['ทั้งหมด', ...new Set(medicines.map(m => m.category))];
     const filtered = medicines.filter(m => {
         const q = search.toLowerCase();
@@ -4338,14 +4404,14 @@ function PharmacyPage({ medicines, saveMedicine, deleteMedicine, receipts, treat
     });
     const lowStock = medicines.filter(m => m.stock <= m.minstock);
     const expireSoon = medicines.filter(m => (new Date(m.expire) - new Date()) / (1000 * 60 * 60 * 24) < 90);
-    const saveMed = async (f) => {
+    const saveMed = (f) => __awaiter(this, void 0, void 0, function* () {
         const med = f.id ? f : Object.assign(Object.assign({}, f), { id: 'M' + pad(medicines.length + 1, 3) });
-        await saveMedicine(med);
+        yield saveMedicine(med);
         setEdit(null);
         setAdding(false);
-    };
-    const delMed = async (id) => { if (window.confirm('ยืนยันลบ?'))
-        await deleteMedicine(id); };
+    });
+    const delMed = (id) => __awaiter(this, void 0, void 0, function* () { if (window.confirm('ยืนยันลบ?'))
+        yield deleteMedicine(id); });
     // Consumption report — date range filter state
     const [rptPeriod, setRptPeriod] = useState('today');
     const [rptYear, setRptYear] = useState(String(new Date().getFullYear()));
