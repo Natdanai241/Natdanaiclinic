@@ -9,6 +9,225 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 const { useState, useEffect, useRef } = React;
+// ===================== AUTH SYSTEM =====================
+// RBAC: roles & permissions
+// doctor   → full access
+// nurse    → dashboard, register, appoint, cert, receipt
+// staff    → dashboard, register, appoint
+const ROLE_LABELS = { doctor: 'แพทย์', nurse: 'พยาบาล', staff: 'เจ้าหน้าที่อื่นๆ' };
+const ROLE_ALLOWED = {
+    doctor: ['dashboard', 'register', 'examine', 'cert', 'receipt', 'appoint', 'accounting', 'pharmacy'],
+    nurse: ['dashboard', 'register', 'cert', 'receipt', 'appoint'],
+    staff: ['dashboard', 'register', 'appoint'],
+};
+// Simple password hash (SHA-256 hex, computed client-side)
+function sha256(text) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const buf = yield crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+        return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+    });
+}
+// In-memory user store backed by localStorage key "clinic_users"
+const AUTH_KEY = 'clinic_users_v1';
+const SESSION_KEY = 'clinic_session_v1';
+function loadUsers() {
+    try {
+        return JSON.parse(localStorage.getItem(AUTH_KEY) || '[]');
+    }
+    catch (_) {
+        return [];
+    }
+}
+function saveUsers(users) {
+    localStorage.setItem(AUTH_KEY, JSON.stringify(users));
+}
+function loadSession() {
+    try {
+        return JSON.parse(sessionStorage.getItem(SESSION_KEY) || 'null');
+    }
+    catch (_) {
+        return null;
+    }
+}
+function saveSession(u) {
+    if (u)
+        sessionStorage.setItem(SESSION_KEY, JSON.stringify(u));
+    else
+        sessionStorage.removeItem(SESSION_KEY);
+}
+// ── Login Page
+function LoginPage({ onLogin, onGoRegister }) {
+    const [ident, setIdent] = React.useState('');
+    const [pass, setPass] = React.useState('');
+    const [err, setErr] = React.useState('');
+    const [loading, setLoading] = React.useState(false);
+    const [showPass, setShowPass] = React.useState(false);
+    const doLogin = () => __awaiter(this, void 0, void 0, function* () {
+        if (!ident.trim() || !pass.trim()) {
+            setErr('กรุณากรอกข้อมูลให้ครบ');
+            return;
+        }
+        setLoading(true);
+        setErr('');
+        const hash = yield sha256(pass);
+        const users = loadUsers();
+        const id = ident.trim().toLowerCase();
+        const u = users.find(u => u.email === id || u.lineId === id);
+        if (!u || u.passHash !== hash) {
+            setErr('อีเมล/LINE ID หรือรหัสผ่านไม่ถูกต้อง');
+            setLoading(false);
+            return;
+        }
+        const session = { id: u.id, name: u.name, role: u.role, email: u.email, lineId: u.lineId };
+        saveSession(session);
+        setLoading(false);
+        onLogin(session);
+    });
+    return (React.createElement("div", { style: { minHeight: '100vh', background: 'linear-gradient(135deg,#1a5276 0%,#2e86c1 60%,#1a8a5e 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, fontFamily: "'Sarabun','Noto Sans Thai',sans-serif" } },
+        React.createElement("style", null, `@import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700&display=swap');*{box-sizing:border-box;margin:0;padding:0;}body{font-family:'Sarabun',sans-serif;}`),
+        React.createElement("div", { style: { width: '100%', maxWidth: 420 } },
+            React.createElement("div", { style: { background: '#fff', borderRadius: 18, boxShadow: '0 20px 60px rgba(0,0,0,0.25)', padding: '36px 36px 30px', position: 'relative', overflow: 'hidden' } },
+                React.createElement("div", { style: { position: 'absolute', top: 0, left: 0, right: 0, height: 5, background: 'linear-gradient(90deg,#1a5276,#2e86c1,#1a8a5e)' } }),
+                React.createElement("div", { style: { textAlign: 'center', marginBottom: 28 } },
+                    React.createElement("img", { src: CLINIC_LOGO, alt: "logo", style: { width: 72, height: 72, objectFit: 'contain', borderRadius: '50%', border: '3px solid #e8f4fd', padding: 4, marginBottom: 10 } }),
+                    React.createElement("div", { style: { fontWeight: 700, fontSize: 18, color: '#1a5276', lineHeight: 1.3 } }, CLINIC_NAME),
+                    React.createElement("div", { style: { fontSize: 12, color: '#7f8c8d', marginTop: 3 } }, "\u0E23\u0E30\u0E1A\u0E1A\u0E08\u0E31\u0E14\u0E01\u0E32\u0E23\u0E04\u0E25\u0E34\u0E19\u0E34\u0E01")),
+                React.createElement("div", { style: { fontSize: 15, fontWeight: 700, color: '#2c3e50', marginBottom: 18, textAlign: 'center' } }, "\uD83D\uDD10 \u0E40\u0E02\u0E49\u0E32\u0E2A\u0E39\u0E48\u0E23\u0E30\u0E1A\u0E1A"),
+                err && React.createElement("div", { style: { background: '#fadbd8', border: '1px solid #e74c3c', borderRadius: 8, padding: '9px 14px', fontSize: 13, color: '#c0392b', marginBottom: 14 } }, err),
+                React.createElement("div", { style: { marginBottom: 14 } },
+                    React.createElement("label", { style: { fontSize: 12, fontWeight: 600, color: '#2c3e50', display: 'block', marginBottom: 5 } }, "\u0E2D\u0E35\u0E40\u0E21\u0E25 \u0E2B\u0E23\u0E37\u0E2D LINE ID"),
+                    React.createElement("input", { value: ident, onChange: e => setIdent(e.target.value), onKeyDown: e => e.key === 'Enter' && doLogin(), placeholder: "\u0E01\u0E23\u0E2D\u0E01\u0E2D\u0E35\u0E40\u0E21\u0E25\u0E2B\u0E23\u0E37\u0E2D LINE ID", style: { width: '100%', padding: '10px 14px', border: '1.5px solid #d0d7de', borderRadius: 8, fontSize: 14, fontFamily: 'inherit', outline: 'none', transition: 'border 0.15s' }, onFocus: e => e.target.style.borderColor = '#2e86c1', onBlur: e => e.target.style.borderColor = '#d0d7de' })),
+                React.createElement("div", { style: { marginBottom: 20, position: 'relative' } },
+                    React.createElement("label", { style: { fontSize: 12, fontWeight: 600, color: '#2c3e50', display: 'block', marginBottom: 5 } }, "\u0E23\u0E2B\u0E31\u0E2A\u0E1C\u0E48\u0E32\u0E19"),
+                    React.createElement("input", { value: pass, onChange: e => setPass(e.target.value), onKeyDown: e => e.key === 'Enter' && doLogin(), type: showPass ? 'text' : 'password', placeholder: "\u0E23\u0E2B\u0E31\u0E2A\u0E1C\u0E48\u0E32\u0E19", style: { width: '100%', padding: '10px 44px 10px 14px', border: '1.5px solid #d0d7de', borderRadius: 8, fontSize: 14, fontFamily: 'inherit', outline: 'none', transition: 'border 0.15s' }, onFocus: e => e.target.style.borderColor = '#2e86c1', onBlur: e => e.target.style.borderColor = '#d0d7de' }),
+                    React.createElement("button", { onClick: () => setShowPass(v => !v), style: { position: 'absolute', right: 12, top: 30, background: 'none', border: 'none', cursor: 'pointer', fontSize: 16, color: '#7f8c8d', padding: 2 } }, showPass ? '🙈' : '👁️')),
+                React.createElement("button", { onClick: doLogin, disabled: loading, style: { width: '100%', padding: '12px 0', background: loading ? '#95a5a6' : 'linear-gradient(135deg,#1a5276,#2e86c1)', color: '#fff', border: 'none', borderRadius: 9, fontSize: 15, fontWeight: 700, cursor: loading ? 'not-allowed' : 'pointer', fontFamily: 'inherit', boxShadow: '0 4px 12px rgba(26,82,118,0.35)', transition: 'all 0.2s' } }, loading ? 'กำลังเข้าสู่ระบบ...' : 'เข้าสู่ระบบ'),
+                React.createElement("div", { style: { textAlign: 'center', marginTop: 18, fontSize: 13, color: '#7f8c8d' } },
+                    "\u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E21\u0E35\u0E1A\u0E31\u0E0D\u0E0A\u0E35?",
+                    ' ',
+                    React.createElement("span", { onClick: onGoRegister, style: { color: '#2e86c1', fontWeight: 700, cursor: 'pointer', textDecoration: 'underline' } }, "\u0E2A\u0E21\u0E31\u0E04\u0E23\u0E2A\u0E21\u0E32\u0E0A\u0E34\u0E01"))),
+            React.createElement("div", { style: { textAlign: 'center', marginTop: 16, fontSize: 11, color: 'rgba(255,255,255,0.7)' } },
+                CLINIC_NAME,
+                " \u2022 \u0E23\u0E30\u0E1A\u0E1A\u0E08\u0E31\u0E14\u0E01\u0E32\u0E23\u0E04\u0E25\u0E34\u0E19\u0E34\u0E01\u0E20\u0E32\u0E22\u0E43\u0E19"))));
+}
+// ── Register Page
+function RegisterPage_Auth({ onSuccess, onGoLogin }) {
+    const [name, setName] = React.useState('');
+    const [email, setEmail] = React.useState('');
+    const [lineId, setLineId] = React.useState('');
+    const [role, setRole] = React.useState('nurse');
+    const [pass, setPass] = React.useState('');
+    const [pass2, setPass2] = React.useState('');
+    const [err, setErr] = React.useState('');
+    const [loading, setLoading] = React.useState(false);
+    const [showPass, setShowPass] = React.useState(false);
+    const doRegister = () => __awaiter(this, void 0, void 0, function* () {
+        if (!name.trim()) {
+            setErr('กรุณากรอกชื่อ-นามสกุล');
+            return;
+        }
+        if (!email.trim() && !lineId.trim()) {
+            setErr('กรุณากรอกอีเมล หรือ LINE ID อย่างน้อย 1 อย่าง');
+            return;
+        }
+        if (email.trim() && !/^[^@]+@[^@]+\.[^@]+$/.test(email.trim())) {
+            setErr('รูปแบบอีเมลไม่ถูกต้อง');
+            return;
+        }
+        if (!pass) {
+            setErr('กรุณากรอกรหัสผ่าน');
+            return;
+        }
+        if (pass.length < 6) {
+            setErr('รหัสผ่านต้องมีอย่างน้อย 6 ตัวอักษร');
+            return;
+        }
+        if (pass !== pass2) {
+            setErr('รหัสผ่านไม่ตรงกัน');
+            return;
+        }
+        setLoading(true);
+        setErr('');
+        const users = loadUsers();
+        const emailLower = email.trim().toLowerCase();
+        const lineLower = lineId.trim().toLowerCase();
+        if (emailLower && users.find(u => u.email === emailLower)) {
+            setErr('อีเมลนี้ถูกใช้แล้ว');
+            setLoading(false);
+            return;
+        }
+        if (lineLower && users.find(u => u.lineId === lineLower)) {
+            setErr('LINE ID นี้ถูกใช้แล้ว');
+            setLoading(false);
+            return;
+        }
+        const hash = yield sha256(pass);
+        const newUser = { id: 'U' + Date.now(), name: name.trim(), email: emailLower, lineId: lineLower, role, passHash: hash, createdAt: new Date().toISOString() };
+        saveUsers([...users, newUser]);
+        setLoading(false);
+        onSuccess();
+    });
+    const roles = [
+        { k: 'doctor', l: '👨‍⚕️ แพทย์', desc: 'เข้าถึงทุกหน้าในระบบ' },
+        { k: 'nurse', l: '👩‍⚕️ พยาบาล', desc: 'หน้าหลัก, ลงทะเบียน, นัดหมาย, ใบรับรองแพทย์, ใบเสร็จ' },
+        { k: 'staff', l: '🧑‍💼 เจ้าหน้าที่อื่นๆ', desc: 'หน้าหลัก, ลงทะเบียน, นัดหมาย' },
+    ];
+    return (React.createElement("div", { style: { minHeight: '100vh', background: 'linear-gradient(135deg,#1a5276 0%,#2e86c1 60%,#1a8a5e 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, fontFamily: "'Sarabun','Noto Sans Thai',sans-serif" } },
+        React.createElement("div", { style: { width: '100%', maxWidth: 480 } },
+            React.createElement("div", { style: { background: '#fff', borderRadius: 18, boxShadow: '0 20px 60px rgba(0,0,0,0.25)', padding: '36px 36px 30px', position: 'relative', overflow: 'hidden' } },
+                React.createElement("div", { style: { position: 'absolute', top: 0, left: 0, right: 0, height: 5, background: 'linear-gradient(90deg,#1a5276,#2e86c1,#1a8a5e)' } }),
+                React.createElement("div", { style: { textAlign: 'center', marginBottom: 20 } },
+                    React.createElement("img", { src: CLINIC_LOGO, alt: "logo", style: { width: 60, height: 60, objectFit: 'contain', borderRadius: '50%', border: '3px solid #e8f4fd', padding: 3, marginBottom: 8 } }),
+                    React.createElement("div", { style: { fontWeight: 700, fontSize: 16, color: '#1a5276' } }, CLINIC_NAME)),
+                React.createElement("div", { style: { fontSize: 15, fontWeight: 700, color: '#2c3e50', marginBottom: 18, textAlign: 'center' } }, "\uD83D\uDCDD \u0E2A\u0E21\u0E31\u0E04\u0E23\u0E2A\u0E21\u0E32\u0E0A\u0E34\u0E01\u0E43\u0E2B\u0E21\u0E48"),
+                err && React.createElement("div", { style: { background: '#fadbd8', border: '1px solid #e74c3c', borderRadius: 8, padding: '9px 14px', fontSize: 13, color: '#c0392b', marginBottom: 14 } }, err),
+                React.createElement("div", { style: { marginBottom: 13 } },
+                    React.createElement("label", { style: { fontSize: 12, fontWeight: 600, color: '#2c3e50', display: 'block', marginBottom: 4 } }, "\u0E0A\u0E37\u0E48\u0E2D-\u0E19\u0E32\u0E21\u0E2A\u0E01\u0E38\u0E25 *"),
+                    React.createElement("input", { value: name, onChange: e => setName(e.target.value), placeholder: "\u0E0A\u0E37\u0E48\u0E2D-\u0E19\u0E32\u0E21\u0E2A\u0E01\u0E38\u0E25", style: { width: '100%', padding: '9px 13px', border: '1.5px solid #d0d7de', borderRadius: 8, fontSize: 14, fontFamily: 'inherit', outline: 'none' }, onFocus: e => e.target.style.borderColor = '#2e86c1', onBlur: e => e.target.style.borderColor = '#d0d7de' })),
+                React.createElement("div", { style: { marginBottom: 13 } },
+                    React.createElement("label", { style: { fontSize: 12, fontWeight: 600, color: '#2c3e50', display: 'block', marginBottom: 6 } }, "\u0E15\u0E33\u0E41\u0E2B\u0E19\u0E48\u0E07 / \u0E1A\u0E17\u0E1A\u0E32\u0E17 *"),
+                    React.createElement("div", { style: { display: 'flex', gap: 8, flexDirection: 'column' } }, roles.map(r => (React.createElement("label", { key: r.k, style: { display: 'flex', alignItems: 'flex-start', gap: 10, padding: '10px 13px', border: `1.5px solid ${role === r.k ? '#2e86c1' : '#d0d7de'}`, borderRadius: 8, cursor: 'pointer', background: role === r.k ? '#e8f4fd' : '#fff', transition: 'all 0.15s' } },
+                        React.createElement("input", { type: "radio", name: "role", value: r.k, checked: role === r.k, onChange: () => setRole(r.k), style: { marginTop: 3, flexShrink: 0 } }),
+                        React.createElement("div", null,
+                            React.createElement("div", { style: { fontWeight: 700, fontSize: 13, color: role === r.k ? '#1a5276' : '#2c3e50' } }, r.l),
+                            React.createElement("div", { style: { fontSize: 11, color: '#7f8c8d', marginTop: 2 } }, r.desc))))))),
+                React.createElement("div", { style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 13 } },
+                    React.createElement("div", null,
+                        React.createElement("label", { style: { fontSize: 12, fontWeight: 600, color: '#2c3e50', display: 'block', marginBottom: 4 } }, "\u0E2D\u0E35\u0E40\u0E21\u0E25"),
+                        React.createElement("input", { value: email, onChange: e => setEmail(e.target.value), placeholder: "example@email.com", type: "email", style: { width: '100%', padding: '9px 13px', border: '1.5px solid #d0d7de', borderRadius: 8, fontSize: 13, fontFamily: 'inherit', outline: 'none' }, onFocus: e => e.target.style.borderColor = '#2e86c1', onBlur: e => e.target.style.borderColor = '#d0d7de' })),
+                    React.createElement("div", null,
+                        React.createElement("label", { style: { fontSize: 12, fontWeight: 600, color: '#2c3e50', display: 'block', marginBottom: 4 } }, "LINE ID"),
+                        React.createElement("input", { value: lineId, onChange: e => setLineId(e.target.value), placeholder: "line_id \u0E02\u0E2D\u0E07\u0E04\u0E38\u0E13", style: { width: '100%', padding: '9px 13px', border: '1.5px solid #d0d7de', borderRadius: 8, fontSize: 13, fontFamily: 'inherit', outline: 'none' }, onFocus: e => e.target.style.borderColor = '#2e86c1', onBlur: e => e.target.style.borderColor = '#d0d7de' }))),
+                React.createElement("div", { style: { fontSize: 11, color: '#7f8c8d', marginTop: -8, marginBottom: 13 } }, "* \u0E15\u0E49\u0E2D\u0E07\u0E01\u0E23\u0E2D\u0E01\u0E2D\u0E22\u0E48\u0E32\u0E07\u0E19\u0E49\u0E2D\u0E22 1 \u0E2D\u0E22\u0E48\u0E32\u0E07 (\u0E2D\u0E35\u0E40\u0E21\u0E25 \u0E2B\u0E23\u0E37\u0E2D LINE ID)"),
+                React.createElement("div", { style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 20, position: 'relative' } },
+                    React.createElement("div", null,
+                        React.createElement("label", { style: { fontSize: 12, fontWeight: 600, color: '#2c3e50', display: 'block', marginBottom: 4 } }, "\u0E23\u0E2B\u0E31\u0E2A\u0E1C\u0E48\u0E32\u0E19 *"),
+                        React.createElement("div", { style: { position: 'relative' } },
+                            React.createElement("input", { value: pass, onChange: e => setPass(e.target.value), type: showPass ? 'text' : 'password', placeholder: "\u0E2D\u0E22\u0E48\u0E32\u0E07\u0E19\u0E49\u0E2D\u0E22 6 \u0E15\u0E31\u0E27", style: { width: '100%', padding: '9px 36px 9px 13px', border: '1.5px solid #d0d7de', borderRadius: 8, fontSize: 13, fontFamily: 'inherit', outline: 'none' }, onFocus: e => e.target.style.borderColor = '#2e86c1', onBlur: e => e.target.style.borderColor = '#d0d7de' }),
+                            React.createElement("button", { onClick: () => setShowPass(v => !v), style: { position: 'absolute', right: 9, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', fontSize: 14, color: '#7f8c8d' } }, showPass ? '🙈' : '👁️'))),
+                    React.createElement("div", null,
+                        React.createElement("label", { style: { fontSize: 12, fontWeight: 600, color: '#2c3e50', display: 'block', marginBottom: 4 } }, "\u0E22\u0E37\u0E19\u0E22\u0E31\u0E19\u0E23\u0E2B\u0E31\u0E2A\u0E1C\u0E48\u0E32\u0E19 *"),
+                        React.createElement("input", { value: pass2, onChange: e => setPass2(e.target.value), type: showPass ? 'text' : 'password', placeholder: "\u0E1E\u0E34\u0E21\u0E1E\u0E4C\u0E2D\u0E35\u0E01\u0E04\u0E23\u0E31\u0E49\u0E07", onKeyDown: e => e.key === 'Enter' && doRegister(), style: { width: '100%', padding: '9px 13px', border: '1.5px solid #d0d7de', borderRadius: 8, fontSize: 13, fontFamily: 'inherit', outline: 'none' }, onFocus: e => e.target.style.borderColor = '#2e86c1', onBlur: e => e.target.style.borderColor = '#d0d7de' }))),
+                React.createElement("button", { onClick: doRegister, disabled: loading, style: { width: '100%', padding: '12px 0', background: loading ? '#95a5a6' : 'linear-gradient(135deg,#1e8449,#27ae60)', color: '#fff', border: 'none', borderRadius: 9, fontSize: 15, fontWeight: 700, cursor: loading ? 'not-allowed' : 'pointer', fontFamily: 'inherit', boxShadow: '0 4px 12px rgba(30,132,73,0.35)' } }, loading ? 'กำลังสมัคร...' : '✅ สมัครสมาชิก'),
+                React.createElement("div", { style: { textAlign: 'center', marginTop: 16, fontSize: 13, color: '#7f8c8d' } },
+                    "\u0E21\u0E35\u0E1A\u0E31\u0E0D\u0E0A\u0E35\u0E41\u0E25\u0E49\u0E27?",
+                    ' ',
+                    React.createElement("span", { onClick: onGoLogin, style: { color: '#2e86c1', fontWeight: 700, cursor: 'pointer', textDecoration: 'underline' } }, "\u0E40\u0E02\u0E49\u0E32\u0E2A\u0E39\u0E48\u0E23\u0E30\u0E1A\u0E1A"))))));
+}
+// ── Root App wrapper — handles auth gate
+function AppRoot() {
+    const [authPage, setAuthPage] = React.useState('login'); // 'login' | 'register'
+    const [session, setSession] = React.useState(() => loadSession());
+    const handleLogin = (s) => { setSession(s); };
+    const handleLogout = () => { saveSession(null); setSession(null); setAuthPage('login'); };
+    const handleRegisterSuccess = () => { alert('✅ สมัครสมาชิกสำเร็จ! กรุณาเข้าสู่ระบบ'); setAuthPage('login'); };
+    if (!session) {
+        if (authPage === 'register')
+            return React.createElement(RegisterPage_Auth, { onSuccess: handleRegisterSuccess, onGoLogin: () => setAuthPage('login') });
+        return React.createElement(LoginPage, { onLogin: handleLogin, onGoRegister: () => setAuthPage('register') });
+    }
+    return React.createElement(ClinicDashboard, { session, onLogout: handleLogout });
+}
 // ===================== SUPABASE CONFIG =====================
 const SUPA_URL = "https://ggshgsyoytrkbnepsryu.supabase.co";
 const SUPA_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imdnc2hnc3lveXRya2JuZXBzcnl1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE2ODQ5NjEsImV4cCI6MjA5NzI2MDk2MX0.hH0ERaYGLueEtxjW8dNVs0d3q3IugCglxc2vlyLoXYQ";
@@ -490,7 +709,10 @@ const SAMPLE_SERVICES = [
     { id: 'S014', name: 'ค่าบริการอื่นๆ', category: 'อื่นๆ', price: 0, unit: 'ครั้ง', active: true },
 ];
 // ===================== MAIN APP =====================
-function ClinicDashboard() {
+function ClinicDashboard({ session, onLogout }) {
+    // RBAC: pages this user is allowed to visit
+    const allowedPages = ROLE_ALLOWED[(session === null || session === void 0 ? void 0 : session.role) || 'staff'] || ROLE_ALLOWED.staff;
+    const canAccess = (key) => allowedPages.includes(key);
     const [page, setPage] = useState('dashboard');
     const [dbReady, setDbReady] = useState(false);
     const [dbError, setDbError] = useState(null);
@@ -695,7 +917,7 @@ function ClinicDashboard() {
         const total = r.items.reduce((t, i) => t + i.qty * i.price, 0) - r.discount;
         return s + total;
     }, 0);
-    const NAV = [
+    const NAV_ALL = [
         { key: 'dashboard', icon: '📊', label: 'หน้าหลัก' },
         { key: 'register', icon: '📋', label: 'ลงทะเบียน/เวชระเบียน' },
         { key: 'examine', icon: '🩺', label: 'ตรวจรักษา' },
@@ -705,6 +927,7 @@ function ClinicDashboard() {
         { key: 'accounting', icon: '💼', label: 'บัญชี' },
         { key: 'pharmacy', icon: '💊', label: 'คลังยาและเวชภัณฑ์' },
     ];
+    const NAV = NAV_ALL.filter(n => canAccess(n.key));
     return (React.createElement("div", { style: { minHeight: '100vh', background: '#eef2f7', fontFamily: "'Sarabun','Noto Sans Thai',sans-serif" } },
         React.createElement("style", null, globalStyles),
         loading && (React.createElement("div", { style: { position: 'fixed', inset: 0, background: 'rgba(26,82,118,0.92)', zIndex: 9999, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#fff' } },
@@ -773,18 +996,26 @@ END $$;`),
                     React.createElement("div", { style: { marginTop: 2 } },
                         "\u0E42\u0E17\u0E23. ",
                         CLINIC_TEL))),
-            React.createElement("div", { style: { display: 'flex', gap: 2, padding: '10px 16px 0', overflowX: 'auto', flexWrap: 'nowrap' }, className: "scroll-thin" }, NAV.map(n => (React.createElement("button", { key: n.key, onClick: () => setPage(n.key), style: { background: page === n.key ? 'rgba(255,255,255,0.22)' : 'transparent', color: '#fff', border: 'none', borderRadius: '8px 8px 0 0', padding: '8px 14px', cursor: 'pointer', fontSize: 12.5, fontWeight: page === n.key ? 700 : 400, whiteSpace: 'nowrap', fontFamily: 'inherit', display: 'flex', alignItems: 'center', gap: 5, borderBottom: page === n.key ? '2.5px solid #fff' : '2.5px solid transparent', transition: 'all 0.15s' } },
+            React.createElement("div", { style: { display: 'flex', alignItems: 'center', justifyContent: 'flex-end', padding: '8px 24px 0', gap: 10 } },
+                React.createElement("div", { style: { fontSize: 12, opacity: 0.9, display: 'flex', alignItems: 'center', gap: 6 } },
+                    React.createElement("span", { style: { background: 'rgba(255,255,255,0.2)', borderRadius: 20, padding: '2px 10px', fontSize: 11, fontWeight: 600 } }, ROLE_LABELS[(session === null || session === void 0 ? void 0 : session.role) || 'staff'] || (session === null || session === void 0 ? void 0 : session.role)),
+                    React.createElement("span", { style: { fontWeight: 600 } }, session === null || session === void 0 ? void 0 : session.name)),
+                React.createElement("button", { onClick: () => { if (window.confirm('ยืนยันออกจากระบบ?'))
+                        onLogout(); }, style: { background: 'rgba(255,255,255,0.18)', border: '1px solid rgba(255,255,255,0.35)', color: '#fff', borderRadius: 7, padding: '4px 12px', cursor: 'pointer', fontSize: 12, fontFamily: 'inherit', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 5 } }, "\uD83D\uDEAA \u0E2D\u0E2D\u0E01\u0E08\u0E32\u0E01\u0E23\u0E30\u0E1A\u0E1A")),
+            React.createElement("div", { style: { display: 'flex', gap: 2, padding: '6px 16px 0', overflowX: 'auto', flexWrap: 'nowrap' }, className: "scroll-thin" }, NAV.map(n => (React.createElement("button", { key: n.key, onClick: () => { if (canAccess(n.key))
+                    setPage(n.key); }, style: { background: page === n.key ? 'rgba(255,255,255,0.22)' : 'transparent', color: '#fff', border: 'none', borderRadius: '8px 8px 0 0', padding: '8px 14px', cursor: 'pointer', fontSize: 12.5, fontWeight: page === n.key ? 700 : 400, whiteSpace: 'nowrap', fontFamily: 'inherit', display: 'flex', alignItems: 'center', gap: 5, borderBottom: page === n.key ? '2.5px solid #fff' : '2.5px solid transparent', transition: 'all 0.15s' } },
                 React.createElement("span", null, n.icon),
                 n.label))))),
         React.createElement("div", { style: { padding: '20px 20px 40px', maxWidth: 1200, margin: '0 auto' } },
+            !canAccess(page) && (() => { setTimeout(() => setPage('dashboard'), 0); return null; })(),
             page === 'dashboard' && React.createElement(DashboardPage, { todayVisits: todayVisits, todayAppoints: todayAppoints, lowStock: lowStock, monthRevenue: monthRevenue, patients: patients, visits: visits, appointments: appointments, medicines: medicines, receipts: receipts, today: todayStr }),
-            page === 'register' && React.createElement(RegisterPage, { patients: patients, savePatient: savePatient, visits: visits, saveVisit: saveVisit, deleteVisit: deleteVisit, nextHN: nextHN, nextVID: nextVID, setPage: setPage, getVisitsForHN: getVisitsForHN, getPatient: getPatient, treatmentServices: treatmentServices }),
-            page === 'examine' && React.createElement(ExaminePage, { patients: patients, visits: visits, saveVisit: saveVisit, nextVID: nextVID, getPatient: getPatient, getVisitsForHN: getVisitsForHN, setCertModal: setCertModal, setReceiptModal: setReceiptModal, setAppointModal: setAppointModal, medicines: medicines, patchMedicineStock: patchMedicineStock, treatmentServices: treatmentServices, receipts: receipts, saveReceipt: saveReceipt, nextRID: nextRID, today: todayStr }),
-            page === 'cert' && React.createElement(CertPage, { patients: patients, visits: visits, getPatient: getPatient }),
-            page === 'receipt' && React.createElement(ReceiptPage, { receipts: receipts, saveReceipt: saveReceipt, updateReceipt: updateReceipt, deleteReceipt: deleteReceipt, patients: patients, visits: visits, nextRID: nextRID, getPatient: getPatient, medicines: medicines, patchMedicineStock: patchMedicineStock }),
-            page === 'appoint' && React.createElement(AppointPage, { appointments: appointments, saveAppointment: saveAppointment, deleteAppointment: deleteAppointment, patients: patients, nextAID: nextAID, getPatient: getPatient, today: todayStr }),
-            page === 'accounting' && React.createElement(AccountingPage, { receipts: receipts, today: todayStr }),
-            page === 'pharmacy' && React.createElement(PharmacyPage, { medicines: medicines, saveMedicine: saveMedicine, deleteMedicine: deleteMedicine, receipts: receipts, treatmentServices: treatmentServices, saveTreatmentService: saveTreatmentService, deleteTreatmentService: deleteTreatmentService })),
+            page === 'register' && canAccess('register') && React.createElement(RegisterPage, { patients: patients, savePatient: savePatient, visits: visits, saveVisit: saveVisit, deleteVisit: deleteVisit, nextHN: nextHN, nextVID: nextVID, setPage: setPage, getVisitsForHN: getVisitsForHN, getPatient: getPatient, treatmentServices: treatmentServices }),
+            page === 'examine' && canAccess('examine') && React.createElement(ExaminePage, { patients: patients, visits: visits, saveVisit: saveVisit, nextVID: nextVID, getPatient: getPatient, getVisitsForHN: getVisitsForHN, setCertModal: setCertModal, setReceiptModal: setReceiptModal, setAppointModal: setAppointModal, medicines: medicines, patchMedicineStock: patchMedicineStock, treatmentServices: treatmentServices, receipts: receipts, saveReceipt: saveReceipt, nextRID: nextRID, today: todayStr }),
+            page === 'cert' && canAccess('cert') && React.createElement(CertPage, { patients: patients, visits: visits, getPatient: getPatient }),
+            page === 'receipt' && canAccess('receipt') && React.createElement(ReceiptPage, { receipts: receipts, saveReceipt: saveReceipt, updateReceipt: updateReceipt, deleteReceipt: deleteReceipt, patients: patients, visits: visits, nextRID: nextRID, getPatient: getPatient, medicines: medicines, patchMedicineStock: patchMedicineStock }),
+            page === 'appoint' && canAccess('appoint') && React.createElement(AppointPage, { appointments: appointments, saveAppointment: saveAppointment, deleteAppointment: deleteAppointment, patients: patients, nextAID: nextAID, getPatient: getPatient, today: todayStr }),
+            page === 'accounting' && canAccess('accounting') && React.createElement(AccountingPage, { receipts: receipts, today: todayStr }),
+            page === 'pharmacy' && canAccess('pharmacy') && React.createElement(PharmacyPage, { medicines: medicines, saveMedicine: saveMedicine, deleteMedicine: deleteMedicine, receipts: receipts, treatmentServices: treatmentServices, saveTreatmentService: saveTreatmentService, deleteTreatmentService: deleteTreatmentService })),
         certModal && React.createElement(CertModal, { data: certModal, onClose: () => setCertModal(null), getPatient: getPatient }),
         receiptModal && React.createElement(ReceiptQuickModal, { data: receiptModal, onClose: () => setReceiptModal(null), getPatient: getPatient, nextRID: nextRID, receipts: receipts, saveReceipt: saveReceipt, medicines: medicines, patchMedicineStock: patchMedicineStock }),
         appointModal && React.createElement(AppointQuickModal, { data: appointModal, onClose: () => setAppointModal(null), getPatient: getPatient, appointments: appointments, saveAppointment: saveAppointment, nextAID: nextAID })));
