@@ -1046,9 +1046,7 @@ function ClinicDashboard({ session, onLogout }) {
     const todayAppoints = appointments.filter(a => a.date === todayStr).length;
     const lowStock = medicines.filter(m => m.stock <= m.minstock).length;
     const monthReceipts = receipts.filter(r => r.date && r.date.startsWith(todayStr.slice(0, 7)));
-    const monthRevenue = monthReceipts
-        .filter(r => r.status === 'ชำระแล้ว')
-        .reduce((s, r) => {
+    const monthRevenue = monthReceipts.reduce((s, r) => {
         const total = (r.items || []).reduce((t, i) => t + (Number(i.qty) || 0) * (Number(i.price) || 0), 0) - (Number(r.discount) || 0);
         return s + total;
     }, 0);
@@ -4176,13 +4174,12 @@ function AccountingPage({ receipts, today }) {
     const filtIncome = receipts.filter(r => inRange(r.date));
     const filtExp = expenses.filter(e => inRange(e.date));
     const calcAmt = (r) => (r.items || []).reduce((t, i) => t + (Number(i.qty) || 0) * (Number(i.price) || 0), 0) - (Number(r.discount) || 0);
-    // totalIncome counts ALL receipts in range (including pending) for full picture
+    // totalIncome = ALL receipts in range (status-independent — works even if DB has no status column)
     const totalIncome = filtIncome.reduce((s, r) => s + calcAmt(r), 0);
-    // paidIncome = only confirmed paid — this is the real revenue
     const paidIncome = filtIncome.filter(r => r.status === 'ชำระแล้ว').reduce((s, r) => s + calcAmt(r), 0);
     const pendingIncome = totalIncome - paidIncome;
     const totalExpense = filtExp.reduce((s, e) => s + (Number(e.amount) || 0), 0);
-    const netProfit = paidIncome - totalExpense;
+    const netProfit = totalIncome - totalExpense;
     const saveExp = (f) => {
         if (f.id && expenses.find(e => e.id === f.id)) {
             setExpenses(prev => prev.map(e => e.id === f.id ? f : e));
@@ -4314,18 +4311,17 @@ function AccountingPage({ receipts, today }) {
                 React.createElement("div", { style: { textAlign: 'center', fontSize: 12, color: '#666', marginBottom: 12 } }, r0 === r1 ? thaiDate(r0) : `${thaiDate(r0)} — ${thaiDate(r1)}`)),
             React.createElement("div", { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(170px,1fr))', gap: 12, marginBottom: 16 } },
                 showType !== 'expense' && React.createElement("div", { className: "card", style: { textAlign: 'center', border: '2px solid var(--accent)' } },
-                    React.createElement("div", { style: { fontSize: 11, color: 'var(--accent)', fontWeight: 700, marginBottom: 4 } }, "\uD83D\uDCB0 \u0E23\u0E32\u0E22\u0E23\u0E31\u0E1A\u0E23\u0E27\u0E21 (\u0E0A\u0E33\u0E23\u0E30\u0E41\u0E25\u0E49\u0E27)"),
-                    React.createElement("div", { style: { fontSize: 22, fontWeight: 700, color: 'var(--accent)' } }, paidIncome.toLocaleString()),
+                    React.createElement("div", { style: { fontSize: 11, color: 'var(--accent)', fontWeight: 700, marginBottom: 4 } }, "\uD83D\uDCB0 \u0E23\u0E32\u0E22\u0E23\u0E31\u0E1A\u0E23\u0E27\u0E21"),
+                    React.createElement("div", { style: { fontSize: 22, fontWeight: 700, color: 'var(--accent)' } }, totalIncome.toLocaleString()),
                     React.createElement("div", { style: { fontSize: 11, color: 'var(--gray)' } },
                         "\u0E1A\u0E32\u0E17 (",
-                        filtIncome.filter(r => r.status === 'ชำระแล้ว').length,
+                        filtIncome.length,
                         " \u0E23\u0E32\u0E22\u0E01\u0E32\u0E23)"),
-                    pendingIncome > 0 && React.createElement("div", { style: { fontSize: 10, marginTop: 4, color: '#e67e22' } },
-                        "\u0E23\u0E2D\u0E0A\u0E33\u0E23\u0E30\u0E2D\u0E35\u0E01 ",
-                        pendingIncome.toLocaleString(),
-                        " \u0E1A\u0E32\u0E17 (",
-                        filtIncome.filter(r => r.status !== 'ชำระแล้ว').length,
-                        " \u0E23\u0E32\u0E22\u0E01\u0E32\u0E23)")),
+                    paidIncome > 0 && pendingIncome > 0 && React.createElement("div", { style: { fontSize: 10, marginTop: 4, color: '#e67e22' } },
+                        "\u0E0A\u0E33\u0E23\u0E30\u0E41\u0E25\u0E49\u0E27 ",
+                        paidIncome.toLocaleString(),
+                        " | \u0E23\u0E2D\u0E0A\u0E33\u0E23\u0E30 ",
+                        pendingIncome.toLocaleString())),
                 showType !== 'income' && React.createElement("div", { className: "card", style: { textAlign: 'center', border: '2px solid var(--danger)' } },
                     React.createElement("div", { style: { fontSize: 11, color: 'var(--danger)', fontWeight: 700, marginBottom: 4 } }, "\uD83D\uDCB8 \u0E23\u0E32\u0E22\u0E08\u0E48\u0E32\u0E22\u0E23\u0E27\u0E21"),
                     React.createElement("div", { style: { fontSize: 22, fontWeight: 700, color: 'var(--danger)' } }, totalExpense.toLocaleString()),
@@ -4372,12 +4368,7 @@ function AccountingPage({ receipts, today }) {
                                 allRows.length,
                                 " \u0E23\u0E32\u0E22\u0E01\u0E32\u0E23)"),
                             React.createElement("td", { style: { padding: '9px 12px' } }),
-                            showType !== 'expense' && React.createElement("td", { style: { padding: '9px 12px', textAlign: 'right' } },
-                                paidIncome.toLocaleString(),
-                                pendingIncome > 0 && React.createElement("span", { style: { fontSize: 10, color: '#e67e22', marginLeft: 4 } },
-                                    "(+\u0E23\u0E2D ",
-                                    pendingIncome.toLocaleString(),
-                                    ")")),
+                            showType !== 'expense' && React.createElement("td", { style: { padding: '9px 12px', textAlign: 'right' } }, totalIncome.toLocaleString()),
                             showType !== 'income' && React.createElement("td", { style: { padding: '9px 12px', textAlign: 'right' } }, totalExpense.toLocaleString()),
                             showType === 'both' && React.createElement("td", { style: { padding: '9px 8px', textAlign: 'right', fontSize: 11 }, className: "no-print" },
                                 "\u0E01\u0E33\u0E44\u0E23: ",

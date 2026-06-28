@@ -997,12 +997,10 @@ function ClinicDashboard({session,onLogout}) {
   const todayAppoints = appointments.filter(a=>a.date===todayStr).length;
   const lowStock = medicines.filter(m=>m.stock<=m.minstock).length;
   const monthReceipts = receipts.filter(r=>r.date&&r.date.startsWith(todayStr.slice(0,7)));
-  const monthRevenue = monthReceipts
-    .filter(r => r.status === 'ชำระแล้ว')
-    .reduce((s,r)=>{
-      const total = (r.items||[]).reduce((t,i)=>t+(Number(i.qty)||0)*(Number(i.price)||0),0)-(Number(r.discount)||0);
-      return s+total;
-    },0);
+  const monthRevenue = monthReceipts.reduce((s,r)=>{
+    const total = (r.items||[]).reduce((t,i)=>t+(Number(i.qty)||0)*(Number(i.price)||0),0)-(Number(r.discount)||0);
+    return s+total;
+  },0);
 
   const NAV_ALL = [
     {key:'dashboard',icon:'📊',label:'หน้าหลัก'},
@@ -4717,13 +4715,12 @@ function AccountingPage({receipts,today}) {
   const filtIncome=receipts.filter(r=>inRange(r.date));
   const filtExp=expenses.filter(e=>inRange(e.date));
   const calcAmt=(r)=>(r.items||[]).reduce((t,i)=>t+(Number(i.qty)||0)*(Number(i.price)||0),0)-(Number(r.discount)||0);
-  // totalIncome counts ALL receipts in range (including pending) for full picture
+  // totalIncome = ALL receipts in range (status-independent — works even if DB has no status column)
   const totalIncome=filtIncome.reduce((s,r)=>s+calcAmt(r),0);
-  // paidIncome = only confirmed paid — this is the real revenue
   const paidIncome=filtIncome.filter(r=>r.status==='ชำระแล้ว').reduce((s,r)=>s+calcAmt(r),0);
   const pendingIncome=totalIncome-paidIncome;
   const totalExpense=filtExp.reduce((s,e)=>s+(Number(e.amount)||0),0);
-  const netProfit=paidIncome-totalExpense;
+  const netProfit=totalIncome-totalExpense;
 
   const saveExp=(f)=>{
     if(f.id&&expenses.find(e=>e.id===f.id)){setExpenses(prev=>prev.map(e=>e.id===f.id?f:e));}
@@ -4859,10 +4856,10 @@ function AccountingPage({receipts,today}) {
         {/* Summary cards */}
         <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(170px,1fr))',gap:12,marginBottom:16}}>
           {showType!=='expense'&&<div className="card" style={{textAlign:'center',border:'2px solid var(--accent)'}}>
-            <div style={{fontSize:11,color:'var(--accent)',fontWeight:700,marginBottom:4}}>💰 รายรับรวม (ชำระแล้ว)</div>
-            <div style={{fontSize:22,fontWeight:700,color:'var(--accent)'}}>{paidIncome.toLocaleString()}</div>
-            <div style={{fontSize:11,color:'var(--gray)'}}>บาท ({filtIncome.filter(r=>r.status==='ชำระแล้ว').length} รายการ)</div>
-            {pendingIncome>0&&<div style={{fontSize:10,marginTop:4,color:'#e67e22'}}>รอชำระอีก {pendingIncome.toLocaleString()} บาท ({filtIncome.filter(r=>r.status!=='ชำระแล้ว').length} รายการ)</div>}
+            <div style={{fontSize:11,color:'var(--accent)',fontWeight:700,marginBottom:4}}>💰 รายรับรวม</div>
+            <div style={{fontSize:22,fontWeight:700,color:'var(--accent)'}}>{totalIncome.toLocaleString()}</div>
+            <div style={{fontSize:11,color:'var(--gray)'}}>บาท ({filtIncome.length} รายการ)</div>
+            {paidIncome>0&&pendingIncome>0&&<div style={{fontSize:10,marginTop:4,color:'#e67e22'}}>ชำระแล้ว {paidIncome.toLocaleString()} | รอชำระ {pendingIncome.toLocaleString()}</div>}
           </div>}
           {showType!=='income'&&<div className="card" style={{textAlign:'center',border:'2px solid var(--danger)'}}>
             <div style={{fontSize:11,color:'var(--danger)',fontWeight:700,marginBottom:4}}>💸 รายจ่ายรวม</div>
@@ -4916,7 +4913,7 @@ function AccountingPage({receipts,today}) {
               <tr style={{background:'#1a5276',color:'#fff',fontWeight:700,fontSize:13}}>
                 <td colSpan={showType==='both'?3:3} style={{padding:'9px 12px'}}>รวมทั้งหมด ({allRows.length} รายการ)</td>
                 <td style={{padding:'9px 12px'}}></td>
-                {showType!=='expense'&&<td style={{padding:'9px 12px',textAlign:'right'}}>{paidIncome.toLocaleString()}{pendingIncome>0&&<span style={{fontSize:10,color:'#e67e22',marginLeft:4}}>(+รอ {pendingIncome.toLocaleString()})</span>}</td>}
+                {showType!=='expense'&&<td style={{padding:'9px 12px',textAlign:'right'}}>{totalIncome.toLocaleString()}</td>}
                 {showType!=='income'&&<td style={{padding:'9px 12px',textAlign:'right'}}>{totalExpense.toLocaleString()}</td>}
                 {showType==='both'&&<td style={{padding:'9px 8px',textAlign:'right',fontSize:11}} className="no-print">กำไร: {netProfit.toLocaleString()}</td>}
                 {showType!=='both'&&<td className="no-print"></td>}
