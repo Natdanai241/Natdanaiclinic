@@ -355,12 +355,28 @@ const supa = {
   },
 
   // ── Generic fetch all rows from a table
+  // Try ordering by created_at; if missing (400), fall back to id, then no ordering
   async getAll(table) {
-    try {
-      const r = await fetch(`${SUPA_URL}/rest/v1/${table}?order=created_at.asc`, { headers: this.headers });
-      if (!r.ok) { console.error(`getAll ${table}:`, await r.text()); return null; }
-      return r.json();
-    } catch(e) { console.error(`getAll ${table} network error:`, e); return null; }
+    const urls = [
+      `${SUPA_URL}/rest/v1/${table}?order=created_at.asc`,
+      `${SUPA_URL}/rest/v1/${table}?order=id.asc`,
+      `${SUPA_URL}/rest/v1/${table}`,
+    ];
+    for (const url of urls) {
+      try {
+        const r = await fetch(url, { headers: this.headers });
+        if (r.ok) return r.json();
+        const errText = await r.text();
+        // If 400 and it's a column error, try next URL; otherwise fail
+        if (r.status === 400 && (errText.includes('created_at') || errText.includes('"id"') || errText.includes("'id'"))) {
+          console.warn(`getAll ${table}: column missing, trying next order`);
+          continue;
+        }
+        console.error(`getAll ${table} [HTTP ${r.status}]:`, errText);
+        return null;
+      } catch(e) { console.error(`getAll ${table} network error:`, e); return null; }
+    }
+    return null;
   },
 
   // ── INSERT a single row (POST), retry on column mismatch up to 10 times
@@ -799,14 +815,19 @@ function ClinicDashboard({session,onLogout}) {
           supa.getAll('treatment_services'),
         ]);
         if (cancelled) return;
-        if (pts === null) { setDbError('ไม่สามารถเชื่อมต่อฐานข้อมูลได้ — ใช้ข้อมูลทดสอบแทน'); setLoading(false); return; }
+        // If ALL tables fail (network error), show error and bail
+        if (pts === null && vis === null && recs === null) {
+          setDbError('ไม่สามารถเชื่อมต่อฐานข้อมูลได้ — ใช้ข้อมูลทดสอบแทน'); setLoading(false); return;
+        }
         // Use DB data if tables have rows, else keep sample data as seed
-        if (pts.length > 0) setPatients(pts);
-        if (vis.length > 0) setVisits(vis.map(fromDbVisit));
-        if (apps.length > 0) setAppointments(apps.map(fromDbAppointment));
-        if (recs.length > 0) setReceipts(recs.map(fromDbReceipt));
-        if (meds.length > 0) setMedicines(meds);
-        if (svcs.length > 0) setTreatmentServices(svcs.map(fromDbService));
+        // NOTE: null means DB error for that table — keep sample data in that case
+        if (pts && pts.length > 0) setPatients(pts);
+        if (vis && vis.length > 0) setVisits(vis.map(fromDbVisit));
+        if (apps && apps.length > 0) setAppointments(apps.map(fromDbAppointment));
+        if (recs && recs.length > 0) setReceipts(recs.map(fromDbReceipt));
+        else if (recs === null) console.warn('receipts load failed — keeping sample data');
+        if (meds && meds.length > 0) setMedicines(meds);
+        if (svcs && svcs.length > 0) setTreatmentServices(svcs.map(fromDbService));
         setDbReady(true);
       } catch(e) {
         if (!cancelled) {
@@ -4737,17 +4758,46 @@ function AccountingPage({receipts,today}) {
         </div>
       </div>
 
-      {/* DB schema diagnostic — shown only when receipts exist but all show 0 income */}
-      {receipts.length>0 && totalIncome===0 && (
-        <div className="no-print" style={{background:'#fff3cd',border:'1px solid #ffc107',borderRadius:8,padding:'10px 14px',marginBottom:12,fontSize:12}}>
-          ⚠️ <strong>พบใบเสร็จ {receipts.length} รายการแต่รายรับแสดง 0</strong> — อาจเกิดจาก:
-          <ol style={{marginTop:6,paddingLeft:20}}>
-            <li>ตาราง <code>receipts</code> ยังไม่มีคอลัมน์ <code>status</code> หรือ <code>items</code> ใน Supabase → รัน SQL ด้านล่างแก้ไข</li>
-            <li>ข้อมูล items ใน DB เป็น text ไม่ใช่ jsonb → รัน SQL แปลง type</li>
-          </ol>
-          <div style={{marginTop:6,background:'#2d2d2d',color:'#f8f8f2',borderRadius:6,padding:'8px 10px',fontFamily:'monospace',fontSize:11,whiteSpace:'pre-wrap'}}{...{}}>{`-- วางใน Supabase SQL Editor แล้วกด Run:\nALTER TABLE receipts ADD COLUMN IF NOT EXISTS status text DEFAULT 'ชำระแล้ว';\nALTER TABLE receipts ADD COLUMN IF NOT EXISTS paid text DEFAULT 'เงินสด';\nALTER TABLE receipts ADD COLUMN IF NOT EXISTS discount numeric DEFAULT 0;\nALTER TABLE receipts ADD COLUMN IF NOT EXISTS patname text DEFAULT '';\nALTER TABLE receipts ADD COLUMN IF NOT EXISTS visit_id text DEFAULT '';\n-- แปลง items เป็น jsonb (ถ้ายังเป็น text):\nALTER TABLE receipts ALTER COLUMN items TYPE jsonb USING items::jsonb;\n-- เปิด RLS ให้ anon อ่าน-เขียนได้:\nALTER TABLE receipts ENABLE ROW LEVEL SECURITY;\nDROP POLICY IF EXISTS "anon_all" ON receipts;\nCREATE POLICY "anon_all" ON receipts FOR ALL TO anon USING (true) WITH CHECK (true);`}</div>
-        </div>
-      )}
+      const SQL_FIX = `-- รัน SQL นี้ใน Supabase SQL Editor:
+ALTER TABLE receipts ADD COLUMN IF NOT EXISTS status text DEFAULT 'ชำระแล้ว';
+ALTER TABLE receipts ADD COLUMN IF NOT EXISTS paid text DEFAULT 'เงินสด';
+ALTER TABLE receipts ADD COLUMN IF NOT EXISTS discount numeric DEFAULT 0;
+ALTER TABLE receipts ADD COLUMN IF NOT EXISTS patname text DEFAULT '';
+ALTER TABLE receipts ADD COLUMN IF NOT EXISTS visit_id text DEFAULT '';
+ALTER TABLE receipts ALTER COLUMN items TYPE jsonb USING COALESCE(items::jsonb,'[]'::jsonb);
+ALTER TABLE receipts ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "anon_all" ON receipts;
+CREATE POLICY "anon_all" ON receipts FOR ALL TO anon USING (true) WITH CHECK (true);
+-- อัปเดต rows เก่าที่ status เป็น null ให้เป็น ชำระแล้ว:
+UPDATE receipts SET status = 'ชำระแล้ว' WHERE status IS NULL;`;
+      {/* DB diagnostic banner */}
+      {(()=>{
+        const allSample = receipts.length<=2 && receipts.every(r=>r.id==='R001'||r.id==='R002');
+        const isFiltered = filtIncome.length===0 && receipts.length>0 && !allSample;
+        const hasItemsButZero = receipts.length>0 && totalIncome===0 && !allSample;
+        if (allSample) return (
+          <div className="no-print" style={{background:'#e8f4fd',border:'1px solid #2196F3',borderRadius:8,padding:'10px 14px',marginBottom:12,fontSize:12}}>
+            ℹ️ <strong>แสดงข้อมูลตัวอย่าง — โหลดจาก Supabase ไม่สำเร็จ</strong>
+            <ol style={{marginTop:6,paddingLeft:20}}>
+              <li>ตาราง receipts อาจขาด column หรือ RLS ไม่อนุญาต anon</li>
+              <li>รัน SQL ด้านล่างแล้วรีโหลดหน้า</li>
+            </ol>
+            <pre style={{marginTop:8,background:'#1e1e1e',color:'#d4d4d4',borderRadius:6,padding:'10px',fontSize:10,overflowX:'auto',whiteSpace:'pre-wrap'}}>{SQL_FIX}</pre>
+          </div>
+        );
+        if (isFiltered) return (
+          <div className="no-print" style={{background:'#e8f4fd',border:'1px solid #2196F3',borderRadius:8,padding:'10px 14px',marginBottom:12,fontSize:12}}>
+            ℹ️ มีใบเสร็จ {receipts.length} รายการในระบบ แต่ไม่มีในช่วงนี้ — ลองกด <strong>กำหนดเอง</strong> แล้วขยายช่วงวันที่
+          </div>
+        );
+        if (hasItemsButZero) return (
+          <div className="no-print" style={{background:'#fff3cd',border:'1px solid #ffc107',borderRadius:8,padding:'10px 14px',marginBottom:12,fontSize:12}}>
+            ⚠️ <strong>พบใบเสร็จ {filtIncome.length} รายการในช่วงนี้ แต่รายรับ = 0</strong> — items อาจไม่ได้บันทึกใน DB
+            <pre style={{marginTop:8,background:'#1e1e1e',color:'#d4d4d4',borderRadius:6,padding:'10px',fontSize:10,overflowX:'auto',whiteSpace:'pre-wrap'}}>{SQL_FIX}</pre>
+          </div>
+        );
+        return null;
+      })()}
       <div className="card no-print" style={{marginBottom:14}}>
         <div style={{display:'flex',gap:6,flexWrap:'wrap',alignItems:'center',marginBottom:10}}>
           <span style={{fontWeight:600,fontSize:13}}>ช่วงเวลา:</span>

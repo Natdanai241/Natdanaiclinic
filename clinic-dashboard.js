@@ -370,20 +370,34 @@ const supa = {
         return false;
     },
     // ── Generic fetch all rows from a table
+    // Try ordering by created_at; if missing (400), fall back to id, then no ordering
     getAll(table) {
         return __awaiter(this, void 0, void 0, function* () {
-            try {
-                const r = yield fetch(`${SUPA_URL}/rest/v1/${table}?order=created_at.asc`, { headers: this.headers });
-                if (!r.ok) {
-                    console.error(`getAll ${table}:`, yield r.text());
+            const urls = [
+                `${SUPA_URL}/rest/v1/${table}?order=created_at.asc`,
+                `${SUPA_URL}/rest/v1/${table}?order=id.asc`,
+                `${SUPA_URL}/rest/v1/${table}`,
+            ];
+            for (const url of urls) {
+                try {
+                    const r = yield fetch(url, { headers: this.headers });
+                    if (r.ok)
+                        return r.json();
+                    const errText = yield r.text();
+                    // If 400 and it's a column error, try next URL; otherwise fail
+                    if (r.status === 400 && (errText.includes('created_at') || errText.includes('"id"') || errText.includes("'id'"))) {
+                        console.warn(`getAll ${table}: column missing, trying next order`);
+                        continue;
+                    }
+                    console.error(`getAll ${table} [HTTP ${r.status}]:`, errText);
                     return null;
                 }
-                return r.json();
+                catch (e) {
+                    console.error(`getAll ${table} network error:`, e);
+                    return null;
+                }
             }
-            catch (e) {
-                console.error(`getAll ${table} network error:`, e);
-                return null;
-            }
+            return null;
         });
     },
     // ── INSERT a single row (POST), retry on column mismatch up to 10 times
@@ -847,23 +861,27 @@ function ClinicDashboard({ session, onLogout }) {
                 ]);
                 if (cancelled)
                     return;
-                if (pts === null) {
+                // If ALL tables fail (network error), show error and bail
+                if (pts === null && vis === null && recs === null) {
                     setDbError('ไม่สามารถเชื่อมต่อฐานข้อมูลได้ — ใช้ข้อมูลทดสอบแทน');
                     setLoading(false);
                     return;
                 }
                 // Use DB data if tables have rows, else keep sample data as seed
-                if (pts.length > 0)
+                // NOTE: null means DB error for that table — keep sample data in that case
+                if (pts && pts.length > 0)
                     setPatients(pts);
-                if (vis.length > 0)
+                if (vis && vis.length > 0)
                     setVisits(vis.map(fromDbVisit));
-                if (apps.length > 0)
+                if (apps && apps.length > 0)
                     setAppointments(apps.map(fromDbAppointment));
-                if (recs.length > 0)
+                if (recs && recs.length > 0)
                     setReceipts(recs.map(fromDbReceipt));
-                if (meds.length > 0)
+                else if (recs === null)
+                    console.warn('receipts load failed — keeping sample data');
+                if (meds && meds.length > 0)
                     setMedicines(meds);
-                if (svcs.length > 0)
+                if (svcs && svcs.length > 0)
                     setTreatmentServices(svcs.map(fromDbService));
                 setDbReady(true);
             }
@@ -4199,24 +4217,37 @@ function AccountingPage({ receipts, today }) {
             React.createElement("div", { style: { marginLeft: 'auto', display: 'flex', gap: 8 } },
                 React.createElement("button", { className: "btn btn-print btn-sm no-print", onClick: () => doPrint('accounting-report', 'รายงานบัญชีรายรับ-รายจ่าย') }, "\uD83D\uDDA8\uFE0F \u0E1E\u0E34\u0E21\u0E1E\u0E4C\u0E23\u0E32\u0E22\u0E07\u0E32\u0E19"),
                 React.createElement("button", { className: "btn btn-accent btn-sm", onClick: () => setAddForm({ date: today, category: 'เวชภัณฑ์/ยา', desc: '', amount: 0 }) }, "+ \u0E40\u0E1E\u0E34\u0E48\u0E21\u0E23\u0E32\u0E22\u0E08\u0E48\u0E32\u0E22"))),
-        receipts.length > 0 && totalIncome === 0 && (React.createElement("div", { className: "no-print", style: { background: '#fff3cd', border: '1px solid #ffc107', borderRadius: 8, padding: '10px 14px', marginBottom: 12, fontSize: 12 } },
-            "\u26A0\uFE0F ",
-            React.createElement("strong", null,
-                "\u0E1E\u0E1A\u0E43\u0E1A\u0E40\u0E2A\u0E23\u0E47\u0E08 ",
-                receipts.length,
-                " \u0E23\u0E32\u0E22\u0E01\u0E32\u0E23\u0E41\u0E15\u0E48\u0E23\u0E32\u0E22\u0E23\u0E31\u0E1A\u0E41\u0E2A\u0E14\u0E07 0"),
-            " \u2014 \u0E2D\u0E32\u0E08\u0E40\u0E01\u0E34\u0E14\u0E08\u0E32\u0E01:",
-            React.createElement("ol", { style: { marginTop: 6, paddingLeft: 20 } },
-                React.createElement("li", null,
-                    "\u0E15\u0E32\u0E23\u0E32\u0E07 ",
-                    React.createElement("code", null, "receipts"),
-                    " \u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E21\u0E35\u0E04\u0E2D\u0E25\u0E31\u0E21\u0E19\u0E4C ",
-                    React.createElement("code", null, "status"),
-                    " \u0E2B\u0E23\u0E37\u0E2D ",
-                    React.createElement("code", null, "items"),
-                    " \u0E43\u0E19 Supabase \u2192 \u0E23\u0E31\u0E19 SQL \u0E14\u0E49\u0E32\u0E19\u0E25\u0E48\u0E32\u0E07\u0E41\u0E01\u0E49\u0E44\u0E02"),
-                React.createElement("li", null, "\u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25 items \u0E43\u0E19 DB \u0E40\u0E1B\u0E47\u0E19 text \u0E44\u0E21\u0E48\u0E43\u0E0A\u0E48 jsonb \u2192 \u0E23\u0E31\u0E19 SQL \u0E41\u0E1B\u0E25\u0E07 type")),
-            React.createElement("div", { style: { marginTop: 6, background: '#2d2d2d', color: '#f8f8f2', borderRadius: 6, padding: '8px 10px', fontFamily: 'monospace', fontSize: 11, whiteSpace: 'pre-wrap' } }, `-- วางใน Supabase SQL Editor แล้วกด Run:\nALTER TABLE receipts ADD COLUMN IF NOT EXISTS status text DEFAULT 'ชำระแล้ว';\nALTER TABLE receipts ADD COLUMN IF NOT EXISTS paid text DEFAULT 'เงินสด';\nALTER TABLE receipts ADD COLUMN IF NOT EXISTS discount numeric DEFAULT 0;\nALTER TABLE receipts ADD COLUMN IF NOT EXISTS patname text DEFAULT '';\nALTER TABLE receipts ADD COLUMN IF NOT EXISTS visit_id text DEFAULT '';\n-- แปลง items เป็น jsonb (ถ้ายังเป็น text):\nALTER TABLE receipts ALTER COLUMN items TYPE jsonb USING items::jsonb;\n-- เปิด RLS ให้ anon อ่าน-เขียนได้:\nALTER TABLE receipts ENABLE ROW LEVEL SECURITY;\nDROP POLICY IF EXISTS "anon_all" ON receipts;\nCREATE POLICY "anon_all" ON receipts FOR ALL TO anon USING (true) WITH CHECK (true);`))),
+        "const SQL_FIX = `-- \u0E23\u0E31\u0E19 SQL \u0E19\u0E35\u0E49\u0E43\u0E19 Supabase SQL Editor: ALTER TABLE receipts ADD COLUMN IF NOT EXISTS status text DEFAULT '\u0E0A\u0E33\u0E23\u0E30\u0E41\u0E25\u0E49\u0E27'; ALTER TABLE receipts ADD COLUMN IF NOT EXISTS paid text DEFAULT '\u0E40\u0E07\u0E34\u0E19\u0E2A\u0E14'; ALTER TABLE receipts ADD COLUMN IF NOT EXISTS discount numeric DEFAULT 0; ALTER TABLE receipts ADD COLUMN IF NOT EXISTS patname text DEFAULT ''; ALTER TABLE receipts ADD COLUMN IF NOT EXISTS visit_id text DEFAULT ''; ALTER TABLE receipts ALTER COLUMN items TYPE jsonb USING COALESCE(items::jsonb,'[]'::jsonb); ALTER TABLE receipts ENABLE ROW LEVEL SECURITY; DROP POLICY IF EXISTS \"anon_all\" ON receipts; CREATE POLICY \"anon_all\" ON receipts FOR ALL TO anon USING (true) WITH CHECK (true); -- \u0E2D\u0E31\u0E1B\u0E40\u0E14\u0E15 rows \u0E40\u0E01\u0E48\u0E32\u0E17\u0E35\u0E48 status \u0E40\u0E1B\u0E47\u0E19 null \u0E43\u0E2B\u0E49\u0E40\u0E1B\u0E47\u0E19 \u0E0A\u0E33\u0E23\u0E30\u0E41\u0E25\u0E49\u0E27: UPDATE receipts SET status = '\u0E0A\u0E33\u0E23\u0E30\u0E41\u0E25\u0E49\u0E27' WHERE status IS NULL;`;",
+        (() => {
+            const allSample = receipts.length <= 2 && receipts.every(r => r.id === 'R001' || r.id === 'R002');
+            const isFiltered = filtIncome.length === 0 && receipts.length > 0 && !allSample;
+            const hasItemsButZero = receipts.length > 0 && totalIncome === 0 && !allSample;
+            if (allSample)
+                return (React.createElement("div", { className: "no-print", style: { background: '#e8f4fd', border: '1px solid #2196F3', borderRadius: 8, padding: '10px 14px', marginBottom: 12, fontSize: 12 } },
+                    "\u2139\uFE0F ",
+                    React.createElement("strong", null, "\u0E41\u0E2A\u0E14\u0E07\u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25\u0E15\u0E31\u0E27\u0E2D\u0E22\u0E48\u0E32\u0E07 \u2014 \u0E42\u0E2B\u0E25\u0E14\u0E08\u0E32\u0E01 Supabase \u0E44\u0E21\u0E48\u0E2A\u0E33\u0E40\u0E23\u0E47\u0E08"),
+                    React.createElement("ol", { style: { marginTop: 6, paddingLeft: 20 } },
+                        React.createElement("li", null, "\u0E15\u0E32\u0E23\u0E32\u0E07 receipts \u0E2D\u0E32\u0E08\u0E02\u0E32\u0E14 column \u0E2B\u0E23\u0E37\u0E2D RLS \u0E44\u0E21\u0E48\u0E2D\u0E19\u0E38\u0E0D\u0E32\u0E15 anon"),
+                        React.createElement("li", null, "\u0E23\u0E31\u0E19 SQL \u0E14\u0E49\u0E32\u0E19\u0E25\u0E48\u0E32\u0E07\u0E41\u0E25\u0E49\u0E27\u0E23\u0E35\u0E42\u0E2B\u0E25\u0E14\u0E2B\u0E19\u0E49\u0E32")),
+                    React.createElement("pre", { style: { marginTop: 8, background: '#1e1e1e', color: '#d4d4d4', borderRadius: 6, padding: '10px', fontSize: 10, overflowX: 'auto', whiteSpace: 'pre-wrap' } }, SQL_FIX)));
+            if (isFiltered)
+                return (React.createElement("div", { className: "no-print", style: { background: '#e8f4fd', border: '1px solid #2196F3', borderRadius: 8, padding: '10px 14px', marginBottom: 12, fontSize: 12 } },
+                    "\u2139\uFE0F \u0E21\u0E35\u0E43\u0E1A\u0E40\u0E2A\u0E23\u0E47\u0E08 ",
+                    receipts.length,
+                    " \u0E23\u0E32\u0E22\u0E01\u0E32\u0E23\u0E43\u0E19\u0E23\u0E30\u0E1A\u0E1A \u0E41\u0E15\u0E48\u0E44\u0E21\u0E48\u0E21\u0E35\u0E43\u0E19\u0E0A\u0E48\u0E27\u0E07\u0E19\u0E35\u0E49 \u2014 \u0E25\u0E2D\u0E07\u0E01\u0E14 ",
+                    React.createElement("strong", null, "\u0E01\u0E33\u0E2B\u0E19\u0E14\u0E40\u0E2D\u0E07"),
+                    " \u0E41\u0E25\u0E49\u0E27\u0E02\u0E22\u0E32\u0E22\u0E0A\u0E48\u0E27\u0E07\u0E27\u0E31\u0E19\u0E17\u0E35\u0E48"));
+            if (hasItemsButZero)
+                return (React.createElement("div", { className: "no-print", style: { background: '#fff3cd', border: '1px solid #ffc107', borderRadius: 8, padding: '10px 14px', marginBottom: 12, fontSize: 12 } },
+                    "\u26A0\uFE0F ",
+                    React.createElement("strong", null,
+                        "\u0E1E\u0E1A\u0E43\u0E1A\u0E40\u0E2A\u0E23\u0E47\u0E08 ",
+                        filtIncome.length,
+                        " \u0E23\u0E32\u0E22\u0E01\u0E32\u0E23\u0E43\u0E19\u0E0A\u0E48\u0E27\u0E07\u0E19\u0E35\u0E49 \u0E41\u0E15\u0E48\u0E23\u0E32\u0E22\u0E23\u0E31\u0E1A = 0"),
+                    " \u2014 items \u0E2D\u0E32\u0E08\u0E44\u0E21\u0E48\u0E44\u0E14\u0E49\u0E1A\u0E31\u0E19\u0E17\u0E36\u0E01\u0E43\u0E19 DB",
+                    React.createElement("pre", { style: { marginTop: 8, background: '#1e1e1e', color: '#d4d4d4', borderRadius: 6, padding: '10px', fontSize: 10, overflowX: 'auto', whiteSpace: 'pre-wrap' } }, SQL_FIX)));
+            return null;
+        })(),
         React.createElement("div", { className: "card no-print", style: { marginBottom: 14 } },
             React.createElement("div", { style: { display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginBottom: 10 } },
                 React.createElement("span", { style: { fontWeight: 600, fontSize: 13 } }, "\u0E0A\u0E48\u0E27\u0E07\u0E40\u0E27\u0E25\u0E32:"),
