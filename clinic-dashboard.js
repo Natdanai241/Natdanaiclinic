@@ -989,9 +989,9 @@ function ClinicDashboard({ session, onLogout }) {
     const todayVisits = visits.filter(v => v.date === todayStr).length;
     const todayAppoints = appointments.filter(a => a.date === todayStr).length;
     const lowStock = medicines.filter(m => m.stock <= m.minstock).length;
-    const monthReceipts = receipts.filter(r => r.date.startsWith(todayStr.slice(0, 7)));
+    const monthReceipts = receipts.filter(r => r.date && r.date.startsWith(todayStr.slice(0, 7)));
     const monthRevenue = monthReceipts.reduce((s, r) => {
-        const total = r.items.reduce((t, i) => t + i.qty * i.price, 0) - r.discount;
+        const total = (r.items || []).reduce((t, i) => t + (Number(i.qty) || 0) * (Number(i.price) || 0), 0) - (Number(r.discount) || 0);
         return s + total;
     }, 0);
     const NAV_ALL = [
@@ -3434,7 +3434,7 @@ function ReceiptPage({ receipts, saveReceipt, updateReceipt, deleteReceipt, pati
             (statusFilter === 'paid' && r.status === 'ชำระแล้ว');
         return nameMatch && dateMatch && statusMatch;
     }).sort((a, b) => (b.date || '').localeCompare(a.date || '') || (b.id || '').localeCompare(a.id || ''));
-    const totalFiltered = filtered.reduce((s, r) => s + r.items.reduce((t, i) => t + i.qty * i.price, 0) - r.discount, 0);
+    const totalFiltered = filtered.reduce((s, r) => s + (r.items || []).reduce((t, i) => t + (Number(i.qty) || 0) * (Number(i.price) || 0), 0) - (Number(r.discount) || 0), 0);
     const pendingCount = receipts.filter(r => r.status !== 'ชำระแล้ว').length;
     const [detail, setDetail] = useState(null);
     return (React.createElement("div", null,
@@ -3489,7 +3489,7 @@ function ReceiptPage({ receipts, saveReceipt, updateReceipt, deleteReceipt, pati
                         filtered.length === 0 && React.createElement("tr", null,
                             React.createElement("td", { colSpan: 7, style: { padding: 20, textAlign: 'center', color: 'var(--gray)' } }, "\u0E44\u0E21\u0E48\u0E1E\u0E1A\u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25")),
                         filtered.map((r, i) => {
-                            const total = r.items.reduce((s, it) => s + it.qty * it.price, 0) - r.discount;
+                            const total = (r.items || []).reduce((s, it) => s + (Number(it.qty) || 0) * (Number(it.price) || 0), 0) - (Number(r.discount) || 0);
                             const pat = getPatient(r.hn);
                             const isPending = r.status !== 'ชำระแล้ว';
                             return (React.createElement("tr", { key: r.id, style: { background: isPending ? '#fffaf0' : i % 2 === 0 ? '#fff' : 'var(--gray-pale)' } },
@@ -3580,18 +3580,23 @@ function ReceiptSummary({ receipts }) {
     const [fromDate, setFromDate] = useState('');
     const [toDate, setToDate] = useState('');
     const filtered = receipts.filter(r => {
+        if (!r.date)
+            return false;
         if (period === 'month')
             return r.date.startsWith(`${year}-${month}`);
         if (period === 'year')
             return r.date.startsWith(year);
         return (!fromDate || r.date >= fromDate) && (!toDate || r.date <= toDate);
     });
-    const totalIncome = filtered.reduce((s, r) => s + r.items.reduce((t, i) => t + i.qty * i.price, 0) - r.discount, 0);
+    const calcAmt = (r) => (r.items || []).reduce((t, i) => t + (Number(i.qty) || 0) * (Number(i.price) || 0), 0) - (Number(r.discount) || 0);
+    const totalIncome = filtered.reduce((s, r) => s + calcAmt(r), 0);
+    const paidTotal = filtered.filter(r => r.status === 'ชำระแล้ว').reduce((s, r) => s + calcAmt(r), 0);
+    const pendingTotal = totalIncome - paidTotal;
     const byDate = filtered.reduce((acc, r) => {
         const d = r.date;
         if (!acc[d])
             acc[d] = { income: 0, count: 0 };
-        acc[d].income += r.items.reduce((t, i) => t + i.qty * i.price, 0) - r.discount;
+        acc[d].income += calcAmt(r);
         acc[d].count++;
         return acc;
     }, {});
@@ -3618,9 +3623,14 @@ function ReceiptSummary({ receipts }) {
                         React.createElement("label", null, "\u0E16\u0E36\u0E07"),
                         React.createElement("input", { type: "date", value: toDate, onChange: e => setToDate(e.target.value), style: { width: 160 } }))))),
         React.createElement("div", { style: { display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 14 } },
-            React.createElement("div", { className: "card", style: { textAlign: 'center' } },
+            React.createElement("div", { className: "card", style: { textAlign: 'center', border: '2px solid var(--accent)' } },
                 React.createElement("div", { style: { fontSize: 24, fontWeight: 700, color: 'var(--accent)' } }, totalIncome.toLocaleString()),
-                React.createElement("div", { style: { fontSize: 12, color: 'var(--gray)' } }, "\u0E23\u0E32\u0E22\u0E23\u0E31\u0E1A\u0E23\u0E27\u0E21 (\u0E1A\u0E32\u0E17)")),
+                React.createElement("div", { style: { fontSize: 12, color: 'var(--gray)' } }, "\u0E23\u0E32\u0E22\u0E23\u0E31\u0E1A\u0E23\u0E27\u0E21 (\u0E1A\u0E32\u0E17)"),
+                pendingTotal > 0 && React.createElement("div", { style: { fontSize: 11, marginTop: 4, color: '#e67e22' } },
+                    "\u0E0A\u0E33\u0E23\u0E30\u0E41\u0E25\u0E49\u0E27 ",
+                    paidTotal.toLocaleString(),
+                    " | \u0E23\u0E2D ",
+                    pendingTotal.toLocaleString())),
             React.createElement("div", { className: "card", style: { textAlign: 'center' } },
                 React.createElement("div", { style: { fontSize: 24, fontWeight: 700, color: 'var(--primary)' } }, filtered.length),
                 React.createElement("div", { style: { fontSize: 12, color: 'var(--gray)' } }, "\u0E08\u0E33\u0E19\u0E27\u0E19\u0E43\u0E1A\u0E40\u0E2A\u0E23\u0E47\u0E08")),
@@ -3647,8 +3657,8 @@ function ReceiptSummary({ receipts }) {
                         React.createElement("td", { style: { padding: '8px 14px', textAlign: 'right' } }, totalIncome.toLocaleString())))))));
 }
 function ReceiptDoc({ r, pat, deleteReceipt, onDeleted }) {
-    const total = r.items.reduce((s, i) => s + i.qty * i.price, 0);
-    const net = total - r.discount;
+    const total = (r.items || []).reduce((s, i) => s + (Number(i.qty) || 0) * (Number(i.price) || 0), 0);
+    const net = total - (Number(r.discount) || 0);
     const docId = `receipt-doc-${r.id}`;
     const svcItems = r.items.filter(i => i.type !== 'drug');
     const drugItems = r.items.filter(i => i.type === 'drug');
@@ -4102,10 +4112,15 @@ function AccountingPage({ receipts, today }) {
         return [fromDate || '2000-01-01', toDate || '2099-12-31'];
     };
     const [r0, r1] = getRange();
-    const inRange = (d) => d >= r0 && d <= r1;
-    const filtIncome = receipts.filter(r => inRange(r.date) && r.status === 'ชำระแล้ว');
+    const inRange = (d) => !!d && d >= r0 && d <= r1;
+    // Revenue = ALL receipts in range (status column may not exist in DB schema)
+    // Separate paid/pending for display — locally status is always correct even if DB lacks the column
+    const filtIncome = receipts.filter(r => inRange(r.date));
     const filtExp = expenses.filter(e => inRange(e.date));
-    const totalIncome = filtIncome.reduce((s, r) => s + r.items.reduce((t, i) => t + i.qty * i.price, 0) - r.discount, 0);
+    const calcAmt = (r) => (r.items || []).reduce((t, i) => t + (Number(i.qty) || 0) * (Number(i.price) || 0), 0) - (Number(r.discount) || 0);
+    const totalIncome = filtIncome.reduce((s, r) => s + calcAmt(r), 0);
+    const paidIncome = filtIncome.filter(r => r.status === 'ชำระแล้ว').reduce((s, r) => s + calcAmt(r), 0);
+    const pendingIncome = totalIncome - paidIncome;
     const totalExpense = filtExp.reduce((s, e) => s + e.amount, 0);
     const netProfit = totalIncome - totalExpense;
     const saveExp = (f) => {
@@ -4128,8 +4143,8 @@ function AccountingPage({ receipts, today }) {
     const allRows = [];
     if (showType !== 'expense')
         filtIncome.forEach(r => {
-            const tot = r.items.reduce((s, i) => s + i.qty * i.price, 0) - r.discount;
-            allRows.push({ type: 'income', date: r.date, id: r.id, desc: `ใบเสร็จ ${r.id} — ${r.patname || 'HN:' + r.hn}`, category: 'ค่าตรวจรักษา', income: tot, expense: 0 });
+            const tot = calcAmt(r);
+            allRows.push({ type: 'income', date: r.date || '', id: r.id, desc: `ใบเสร็จ ${r.id} — ${r.patname || 'HN:' + r.hn}`, category: 'ค่าตรวจรักษา', income: tot, expense: 0, status: r.status });
         });
     if (showType !== 'income')
         filtExp.forEach(e => {
@@ -4201,7 +4216,12 @@ function AccountingPage({ receipts, today }) {
                     React.createElement("div", { style: { fontSize: 11, color: 'var(--gray)' } },
                         "\u0E1A\u0E32\u0E17 (",
                         filtIncome.length,
-                        " \u0E23\u0E32\u0E22\u0E01\u0E32\u0E23)")),
+                        " \u0E23\u0E32\u0E22\u0E01\u0E32\u0E23)"),
+                    pendingIncome > 0 && React.createElement("div", { style: { fontSize: 10, marginTop: 4, color: '#e67e22' } },
+                        "\u0E0A\u0E33\u0E23\u0E30\u0E41\u0E25\u0E49\u0E27 ",
+                        paidIncome.toLocaleString(),
+                        " | \u0E23\u0E2D\u0E0A\u0E33\u0E23\u0E30 ",
+                        pendingIncome.toLocaleString())),
                 showType !== 'income' && React.createElement("div", { className: "card", style: { textAlign: 'center', border: '2px solid var(--danger)' } },
                     React.createElement("div", { style: { fontSize: 11, color: 'var(--danger)', fontWeight: 700, marginBottom: 4 } }, "\uD83D\uDCB8 \u0E23\u0E32\u0E22\u0E08\u0E48\u0E32\u0E22\u0E23\u0E27\u0E21"),
                     React.createElement("div", { style: { fontSize: 22, fontWeight: 700, color: 'var(--danger)' } }, totalExpense.toLocaleString()),
@@ -4234,7 +4254,8 @@ function AccountingPage({ receipts, today }) {
                             React.createElement("td", { style: { padding: '8px 12px' } }, row.type === 'income' ? React.createElement("span", { className: "tag tag-green" }, "\u0E23\u0E32\u0E22\u0E23\u0E31\u0E1A") : React.createElement("span", { className: "tag tag-red" }, "\u0E23\u0E32\u0E22\u0E08\u0E48\u0E32\u0E22")),
                             React.createElement("td", { style: { padding: '8px 12px', fontSize: 12 } }, row.desc),
                             React.createElement("td", { style: { padding: '8px 12px' } },
-                                React.createElement("span", { className: "tag tag-blue" }, row.category)),
+                                React.createElement("span", { className: "tag tag-blue" }, row.category),
+                                row.type === 'income' && React.createElement("span", { style: { marginLeft: 4 }, className: `tag ${row.status === 'ชำระแล้ว' ? 'tag-green' : 'tag-orange'}` }, row.status || 'รอชำระ')),
                             showType !== 'expense' && React.createElement("td", { style: { padding: '8px 12px', textAlign: 'right', fontWeight: row.income > 0 ? 700 : 400, color: row.income > 0 ? 'var(--accent)' : '#ccc' } }, row.income > 0 ? row.income.toLocaleString() : '-'),
                             showType !== 'income' && React.createElement("td", { style: { padding: '8px 12px', textAlign: 'right', fontWeight: row.expense > 0 ? 700 : 400, color: row.expense > 0 ? 'var(--danger)' : '#ccc' } }, row.expense > 0 ? row.expense.toLocaleString() : '-'),
                             React.createElement("td", { style: { padding: '8px 8px' }, className: "no-print" }, row.type === 'expense' && React.createElement("div", { style: { display: 'flex', gap: 3 } },

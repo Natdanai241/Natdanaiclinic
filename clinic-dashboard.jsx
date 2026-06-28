@@ -956,9 +956,9 @@ function ClinicDashboard({session,onLogout}) {
   const todayVisits = visits.filter(v=>v.date===todayStr).length;
   const todayAppoints = appointments.filter(a=>a.date===todayStr).length;
   const lowStock = medicines.filter(m=>m.stock<=m.minstock).length;
-  const monthReceipts = receipts.filter(r=>r.date.startsWith(todayStr.slice(0,7)));
+  const monthReceipts = receipts.filter(r=>r.date&&r.date.startsWith(todayStr.slice(0,7)));
   const monthRevenue = monthReceipts.reduce((s,r)=>{
-    const total = r.items.reduce((t,i)=>t+i.qty*i.price,0)-r.discount;
+    const total = (r.items||[]).reduce((t,i)=>t+(Number(i.qty)||0)*(Number(i.price)||0),0)-(Number(r.discount)||0);
     return s+total;
   },0);
 
@@ -3938,7 +3938,7 @@ function ReceiptPage({receipts,saveReceipt,updateReceipt,deleteReceipt,patients,
     return nameMatch&&dateMatch&&statusMatch;
   }).sort((a,b)=>(b.date||'').localeCompare(a.date||'')||(b.id||'').localeCompare(a.id||''));
 
-  const totalFiltered=filtered.reduce((s,r)=>s+r.items.reduce((t,i)=>t+i.qty*i.price,0)-r.discount,0);
+  const totalFiltered=filtered.reduce((s,r)=>s+(r.items||[]).reduce((t,i)=>t+(Number(i.qty)||0)*(Number(i.price)||0),0)-(Number(r.discount)||0),0);
   const pendingCount = receipts.filter(r=>r.status!=='ชำระแล้ว').length;
 
   const [detail,setDetail]=useState(null);
@@ -4002,7 +4002,7 @@ function ReceiptPage({receipts,saveReceipt,updateReceipt,deleteReceipt,patients,
                 <tbody>
                   {filtered.length===0&&<tr><td colSpan={7} style={{padding:20,textAlign:'center',color:'var(--gray)'}}>ไม่พบข้อมูล</td></tr>}
                   {filtered.map((r,i)=>{
-                    const total=r.items.reduce((s,it)=>s+it.qty*it.price,0)-r.discount;
+                    const total=(r.items||[]).reduce((s,it)=>s+(Number(it.qty)||0)*(Number(it.price)||0),0)-(Number(r.discount)||0);
                     const pat=getPatient(r.hn);
                     const isPending = r.status!=='ชำระแล้ว';
                     return (
@@ -4121,15 +4121,19 @@ function ReceiptSummary({receipts}) {
   const [fromDate,setFromDate]=useState('');
   const [toDate,setToDate]=useState('');
   const filtered=receipts.filter(r=>{
+    if(!r.date) return false;
     if(period==='month') return r.date.startsWith(`${year}-${month}`);
     if(period==='year') return r.date.startsWith(year);
     return (!fromDate||r.date>=fromDate)&&(!toDate||r.date<=toDate);
   });
-  const totalIncome=filtered.reduce((s,r)=>s+r.items.reduce((t,i)=>t+i.qty*i.price,0)-r.discount,0);
+  const calcAmt=(r)=>(r.items||[]).reduce((t,i)=>t+(Number(i.qty)||0)*(Number(i.price)||0),0)-(Number(r.discount)||0);
+  const totalIncome=filtered.reduce((s,r)=>s+calcAmt(r),0);
+  const paidTotal=filtered.filter(r=>r.status==='ชำระแล้ว').reduce((s,r)=>s+calcAmt(r),0);
+  const pendingTotal=totalIncome-paidTotal;
   const byDate=filtered.reduce((acc,r)=>{
     const d=r.date;
     if(!acc[d])acc[d]={income:0,count:0};
-    acc[d].income+=r.items.reduce((t,i)=>t+i.qty*i.price,0)-r.discount;
+    acc[d].income+=calcAmt(r);
     acc[d].count++;
     return acc;
   },{});
@@ -4160,9 +4164,10 @@ function ReceiptSummary({receipts}) {
         </div>
       </div>
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:12,marginBottom:14}}>
-        <div className="card" style={{textAlign:'center'}}>
+        <div className="card" style={{textAlign:'center',border:'2px solid var(--accent)'}}>
           <div style={{fontSize:24,fontWeight:700,color:'var(--accent)'}}>{totalIncome.toLocaleString()}</div>
           <div style={{fontSize:12,color:'var(--gray)'}}>รายรับรวม (บาท)</div>
+          {pendingTotal>0&&<div style={{fontSize:11,marginTop:4,color:'#e67e22'}}>ชำระแล้ว {paidTotal.toLocaleString()} | รอ {pendingTotal.toLocaleString()}</div>}
         </div>
         <div className="card" style={{textAlign:'center'}}>
           <div style={{fontSize:24,fontWeight:700,color:'var(--primary)'}}>{filtered.length}</div>
@@ -4204,8 +4209,8 @@ function ReceiptSummary({receipts}) {
 }
 
 function ReceiptDoc({r,pat,deleteReceipt,onDeleted}) {
-  const total=r.items.reduce((s,i)=>s+i.qty*i.price,0);
-  const net=total-r.discount;
+  const total=(r.items||[]).reduce((s,i)=>s+(Number(i.qty)||0)*(Number(i.price)||0),0);
+  const net=total-(Number(r.discount)||0);
   const docId=`receipt-doc-${r.id}`;
   const svcItems=r.items.filter(i=>i.type!=='drug');
   const drugItems=r.items.filter(i=>i.type==='drug');
@@ -4663,11 +4668,16 @@ function AccountingPage({receipts,today}) {
     return [fromDate||'2000-01-01',toDate||'2099-12-31'];
   };
   const [r0,r1]=getRange();
-  const inRange=(d)=>d>=r0&&d<=r1;
+  const inRange=(d)=>!!d&&d>=r0&&d<=r1;
 
-  const filtIncome=receipts.filter(r=>inRange(r.date)&&r.status==='ชำระแล้ว');
+  // Revenue = ALL receipts in range (status column may not exist in DB schema)
+  // Separate paid/pending for display — locally status is always correct even if DB lacks the column
+  const filtIncome=receipts.filter(r=>inRange(r.date));
   const filtExp=expenses.filter(e=>inRange(e.date));
-  const totalIncome=filtIncome.reduce((s,r)=>s+r.items.reduce((t,i)=>t+i.qty*i.price,0)-r.discount,0);
+  const calcAmt=(r)=>(r.items||[]).reduce((t,i)=>t+(Number(i.qty)||0)*(Number(i.price)||0),0)-(Number(r.discount)||0);
+  const totalIncome=filtIncome.reduce((s,r)=>s+calcAmt(r),0);
+  const paidIncome=filtIncome.filter(r=>r.status==='ชำระแล้ว').reduce((s,r)=>s+calcAmt(r),0);
+  const pendingIncome=totalIncome-paidIncome;
   const totalExpense=filtExp.reduce((s,e)=>s+e.amount,0);
   const netProfit=totalIncome-totalExpense;
 
@@ -4686,8 +4696,8 @@ function AccountingPage({receipts,today}) {
   // Build combined ledger rows for display
   const allRows=[];
   if(showType!=='expense') filtIncome.forEach(r=>{
-    const tot=r.items.reduce((s,i)=>s+i.qty*i.price,0)-r.discount;
-    allRows.push({type:'income',date:r.date,id:r.id,desc:`ใบเสร็จ ${r.id} — ${r.patname||'HN:'+r.hn}`,category:'ค่าตรวจรักษา',income:tot,expense:0});
+    const tot=calcAmt(r);
+    allRows.push({type:'income',date:r.date||'',id:r.id,desc:`ใบเสร็จ ${r.id} — ${r.patname||'HN:'+r.hn}`,category:'ค่าตรวจรักษา',income:tot,expense:0,status:r.status});
   });
   if(showType!=='income') filtExp.forEach(e=>{
     allRows.push({type:'expense',date:e.date,id:e.id,desc:e.desc,category:e.category,income:0,expense:e.amount,expObj:e});
@@ -4767,6 +4777,7 @@ function AccountingPage({receipts,today}) {
             <div style={{fontSize:11,color:'var(--accent)',fontWeight:700,marginBottom:4}}>💰 รายรับรวม</div>
             <div style={{fontSize:22,fontWeight:700,color:'var(--accent)'}}>{totalIncome.toLocaleString()}</div>
             <div style={{fontSize:11,color:'var(--gray)'}}>บาท ({filtIncome.length} รายการ)</div>
+            {pendingIncome>0&&<div style={{fontSize:10,marginTop:4,color:'#e67e22'}}>ชำระแล้ว {paidIncome.toLocaleString()} | รอชำระ {pendingIncome.toLocaleString()}</div>}
           </div>}
           {showType!=='income'&&<div className="card" style={{textAlign:'center',border:'2px solid var(--danger)'}}>
             <div style={{fontSize:11,color:'var(--danger)',fontWeight:700,marginBottom:4}}>💸 รายจ่ายรวม</div>
@@ -4801,7 +4812,10 @@ function AccountingPage({receipts,today}) {
                   <td style={{padding:'8px 12px',fontSize:12}}>{thaiDate(row.date)}</td>
                   <td style={{padding:'8px 12px'}}>{row.type==='income'?<span className="tag tag-green">รายรับ</span>:<span className="tag tag-red">รายจ่าย</span>}</td>
                   <td style={{padding:'8px 12px',fontSize:12}}>{row.desc}</td>
-                  <td style={{padding:'8px 12px'}}><span className="tag tag-blue">{row.category}</span></td>
+                  <td style={{padding:'8px 12px'}}>
+                    <span className="tag tag-blue">{row.category}</span>
+                    {row.type==='income'&&<span style={{marginLeft:4}} className={`tag ${row.status==='ชำระแล้ว'?'tag-green':'tag-orange'}`}>{row.status||'รอชำระ'}</span>}
+                  </td>
                   {showType!=='expense'&&<td style={{padding:'8px 12px',textAlign:'right',fontWeight:row.income>0?700:400,color:row.income>0?'var(--accent)':'#ccc'}}>{row.income>0?row.income.toLocaleString():'-'}</td>}
                   {showType!=='income'&&<td style={{padding:'8px 12px',textAlign:'right',fontWeight:row.expense>0?700:400,color:row.expense>0?'var(--danger)':'#ccc'}}>{row.expense>0?row.expense.toLocaleString():'-'}</td>}
                   <td style={{padding:'8px 8px'}} className="no-print">
