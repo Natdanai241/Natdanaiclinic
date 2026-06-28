@@ -4748,6 +4748,20 @@ function AccountingPage({receipts,today}) {
   });
   allRows.sort((a,b)=>b.date.localeCompare(a.date));
 
+  const SQL_FIX = [
+    '-- รัน SQL นี้ใน Supabase SQL Editor แล้วรีโหลดหน้า:',
+    "ALTER TABLE receipts ADD COLUMN IF NOT EXISTS status text DEFAULT 'ชำระแล้ว';",
+    "ALTER TABLE receipts ADD COLUMN IF NOT EXISTS paid text DEFAULT 'เงินสด';",
+    'ALTER TABLE receipts ADD COLUMN IF NOT EXISTS discount numeric DEFAULT 0;',
+    "ALTER TABLE receipts ADD COLUMN IF NOT EXISTS patname text DEFAULT '';",
+    "ALTER TABLE receipts ADD COLUMN IF NOT EXISTS visit_id text DEFAULT '';",
+    "ALTER TABLE receipts ALTER COLUMN items TYPE jsonb USING COALESCE(items::jsonb,'[]'::jsonb);",
+    'ALTER TABLE receipts ENABLE ROW LEVEL SECURITY;',
+    'DROP POLICY IF EXISTS "anon_all" ON receipts;',
+    'CREATE POLICY "anon_all" ON receipts FOR ALL TO anon USING (true) WITH CHECK (true);',
+    "UPDATE receipts SET status = 'ชำระแล้ว' WHERE status IS NULL;",
+  ].join('\n');
+
   return (
     <div>
       <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:16}}>
@@ -4758,18 +4772,6 @@ function AccountingPage({receipts,today}) {
         </div>
       </div>
 
-      const SQL_FIX = `-- รัน SQL นี้ใน Supabase SQL Editor:
-ALTER TABLE receipts ADD COLUMN IF NOT EXISTS status text DEFAULT 'ชำระแล้ว';
-ALTER TABLE receipts ADD COLUMN IF NOT EXISTS paid text DEFAULT 'เงินสด';
-ALTER TABLE receipts ADD COLUMN IF NOT EXISTS discount numeric DEFAULT 0;
-ALTER TABLE receipts ADD COLUMN IF NOT EXISTS patname text DEFAULT '';
-ALTER TABLE receipts ADD COLUMN IF NOT EXISTS visit_id text DEFAULT '';
-ALTER TABLE receipts ALTER COLUMN items TYPE jsonb USING COALESCE(items::jsonb,'[]'::jsonb);
-ALTER TABLE receipts ENABLE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS "anon_all" ON receipts;
-CREATE POLICY "anon_all" ON receipts FOR ALL TO anon USING (true) WITH CHECK (true);
--- อัปเดต rows เก่าที่ status เป็น null ให้เป็น ชำระแล้ว:
-UPDATE receipts SET status = 'ชำระแล้ว' WHERE status IS NULL;`;
       {/* DB diagnostic banner */}
       {(()=>{
         const allSample = receipts.length<=2 && receipts.every(r=>r.id==='R001'||r.id==='R002');

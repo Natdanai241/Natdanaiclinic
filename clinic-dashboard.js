@@ -4211,13 +4211,25 @@ function AccountingPage({ receipts, today }) {
             allRows.push({ type: 'expense', date: e.date, id: e.id, desc: e.desc, category: e.category, income: 0, expense: e.amount, expObj: e });
         });
     allRows.sort((a, b) => b.date.localeCompare(a.date));
+    const SQL_FIX = [
+        '-- รัน SQL นี้ใน Supabase SQL Editor แล้วรีโหลดหน้า:',
+        "ALTER TABLE receipts ADD COLUMN IF NOT EXISTS status text DEFAULT 'ชำระแล้ว';",
+        "ALTER TABLE receipts ADD COLUMN IF NOT EXISTS paid text DEFAULT 'เงินสด';",
+        'ALTER TABLE receipts ADD COLUMN IF NOT EXISTS discount numeric DEFAULT 0;',
+        "ALTER TABLE receipts ADD COLUMN IF NOT EXISTS patname text DEFAULT '';",
+        "ALTER TABLE receipts ADD COLUMN IF NOT EXISTS visit_id text DEFAULT '';",
+        "ALTER TABLE receipts ALTER COLUMN items TYPE jsonb USING COALESCE(items::jsonb,'[]'::jsonb);",
+        'ALTER TABLE receipts ENABLE ROW LEVEL SECURITY;',
+        'DROP POLICY IF EXISTS "anon_all" ON receipts;',
+        'CREATE POLICY "anon_all" ON receipts FOR ALL TO anon USING (true) WITH CHECK (true);',
+        "UPDATE receipts SET status = 'ชำระแล้ว' WHERE status IS NULL;",
+    ].join('\n');
     return (React.createElement("div", null,
         React.createElement("div", { style: { display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 } },
             React.createElement("h2", { style: { fontWeight: 700, fontSize: 18, color: 'var(--primary)' } }, "\uD83D\uDCBC \u0E1A\u0E31\u0E0D\u0E0A\u0E35\u0E23\u0E32\u0E22\u0E23\u0E31\u0E1A-\u0E23\u0E32\u0E22\u0E08\u0E48\u0E32\u0E22"),
             React.createElement("div", { style: { marginLeft: 'auto', display: 'flex', gap: 8 } },
                 React.createElement("button", { className: "btn btn-print btn-sm no-print", onClick: () => doPrint('accounting-report', 'รายงานบัญชีรายรับ-รายจ่าย') }, "\uD83D\uDDA8\uFE0F \u0E1E\u0E34\u0E21\u0E1E\u0E4C\u0E23\u0E32\u0E22\u0E07\u0E32\u0E19"),
                 React.createElement("button", { className: "btn btn-accent btn-sm", onClick: () => setAddForm({ date: today, category: 'เวชภัณฑ์/ยา', desc: '', amount: 0 }) }, "+ \u0E40\u0E1E\u0E34\u0E48\u0E21\u0E23\u0E32\u0E22\u0E08\u0E48\u0E32\u0E22"))),
-        "const SQL_FIX = `-- \u0E23\u0E31\u0E19 SQL \u0E19\u0E35\u0E49\u0E43\u0E19 Supabase SQL Editor: ALTER TABLE receipts ADD COLUMN IF NOT EXISTS status text DEFAULT '\u0E0A\u0E33\u0E23\u0E30\u0E41\u0E25\u0E49\u0E27'; ALTER TABLE receipts ADD COLUMN IF NOT EXISTS paid text DEFAULT '\u0E40\u0E07\u0E34\u0E19\u0E2A\u0E14'; ALTER TABLE receipts ADD COLUMN IF NOT EXISTS discount numeric DEFAULT 0; ALTER TABLE receipts ADD COLUMN IF NOT EXISTS patname text DEFAULT ''; ALTER TABLE receipts ADD COLUMN IF NOT EXISTS visit_id text DEFAULT ''; ALTER TABLE receipts ALTER COLUMN items TYPE jsonb USING COALESCE(items::jsonb,'[]'::jsonb); ALTER TABLE receipts ENABLE ROW LEVEL SECURITY; DROP POLICY IF EXISTS \"anon_all\" ON receipts; CREATE POLICY \"anon_all\" ON receipts FOR ALL TO anon USING (true) WITH CHECK (true); -- \u0E2D\u0E31\u0E1B\u0E40\u0E14\u0E15 rows \u0E40\u0E01\u0E48\u0E32\u0E17\u0E35\u0E48 status \u0E40\u0E1B\u0E47\u0E19 null \u0E43\u0E2B\u0E49\u0E40\u0E1B\u0E47\u0E19 \u0E0A\u0E33\u0E23\u0E30\u0E41\u0E25\u0E49\u0E27: UPDATE receipts SET status = '\u0E0A\u0E33\u0E23\u0E30\u0E41\u0E25\u0E49\u0E27' WHERE status IS NULL;`;",
         (() => {
             const allSample = receipts.length <= 2 && receipts.every(r => r.id === 'R001' || r.id === 'R002');
             const isFiltered = filtIncome.length === 0 && receipts.length > 0 && !allSample;
