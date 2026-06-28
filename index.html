@@ -33,7 +33,7 @@
     </div>
   </div>
 
-  <!-- Global error catcher: shows real error instead of infinite loading -->
+  <!-- Global error catcher -->
   <script>
     window.addEventListener('error', function(e) {
       var box = document.getElementById('errbox');
@@ -45,15 +45,15 @@
     });
   </script>
 
-  <script src="./clinic-dashboard.js?v=3"></script>
+  <script src="./clinic-dashboard.js?v=4"></script>
 
   <script>
     try {
-      if (typeof ClinicDashboard === 'undefined') {
-        throw new Error('ClinicDashboard component was not found. Make sure clinic-dashboard.js is uploaded next to index.html (same folder) and is the compiled JS file, not the old .jsx file.');
+      if (typeof AppRoot === 'undefined') {
+        throw new Error('AppRoot component was not found. Make sure clinic-dashboard.js is the latest compiled version.');
       }
       var root = ReactDOM.createRoot(document.getElementById('root'));
-      root.render(React.createElement(ClinicDashboard));
+      root.render(React.createElement(AppRoot));
     } catch (err) {
       var box = document.getElementById('errbox');
       box.style.display = 'block';

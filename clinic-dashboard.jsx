@@ -4835,20 +4835,3 @@ function Modal({title,onClose,children,width=600}) {
   );
 }
 
-// ===================== MOUNT =====================
-// Always mount AppRoot (auth gate) — never ClinicDashboard directly.
-// Works whether the HTML calls this or uses its own render.
-(function() {
-  const container = document.getElementById('root') || document.getElementById('app') || (function() {
-    const d = document.createElement('div');
-    d.id = 'root';
-    document.body.appendChild(d);
-    return d;
-  })();
-  const root = ReactDOM.createRoot ? ReactDOM.createRoot(container) : null;
-  if (root) {
-    root.render(React.createElement(AppRoot));
-  } else {
-    ReactDOM.render(React.createElement(AppRoot), container);
-  }
-})();
