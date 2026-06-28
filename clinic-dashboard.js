@@ -23,7 +23,7 @@ const DOCTOR_LICENSE = "ว.53359";
 // staff    → dashboard, register, cert, receipt, appoint (same as nurse)
 const ROLE_LABELS = { doctor: 'แพทย์', nurse: 'พยาบาล', staff: 'เจ้าหน้าที่อื่นๆ' };
 const ROLE_ALLOWED = {
-    doctor: ['dashboard', 'register', 'examine', 'cert', 'receipt', 'appoint', 'accounting', 'pharmacy'],
+    doctor: ['dashboard', 'register', 'examine', 'cert', 'receipt', 'appoint', 'accounting', 'pharmacy', 'users'],
     nurse: ['dashboard', 'register', 'cert', 'receipt', 'appoint'],
     staff: ['dashboard', 'register', 'cert', 'receipt', 'appoint'],
 };
@@ -37,16 +37,32 @@ function sha256(text) {
 // In-memory user store backed by localStorage key "clinic_users"
 const AUTH_KEY = 'clinic_users_v1';
 const SESSION_KEY = 'clinic_session_v1';
+const AUDIT_KEY = 'clinic_audit_v1';
+// ── Audit log helpers (localStorage — persists across refresh/logout)
+function loadAuditLog() {
+    try {
+        return JSON.parse(localStorage.getItem(AUDIT_KEY) || '[]');
+    }
+    catch (_) {
+        return [];
+    }
+}
+function addAuditEntry(entry) {
+    const logs = loadAuditLog();
+    logs.unshift(Object.assign(Object.assign({ id: 'AL' + Date.now() }, entry), { ts: new Date().toISOString() }));
+    // Keep max 1000 entries
+    localStorage.setItem(AUDIT_KEY, JSON.stringify(logs.slice(0, 1000)));
+}
 // Seed test accounts — SHA-256 hashes verified with Node.js crypto
 // sha256('d') = 18ac3e7343f016890c510e93f935261169d9e3f565436429830faf0934f4f8e4
 // sha256('n') = 1b16b1df538ba12dc3f97edbb85caa7050d46c148134290feba80f8236c83db9
 // sha256('s') = 043a718774c572bd8a25adbeb1bfcd5c0256ae11cecf9f9c3f925d0e52beaf89
 const TEST_ACCOUNTS = [
-    { id: 'U_D', name: 'Doctor Natdanai', username: 'd', email: '', lineId: '', role: 'doctor',
+    { id: 'U_D', name: 'Doctor Natdanai', username: 'd', email: '', lineId: '', role: 'doctor', status: 'active',
         passHash: '18ac3e7343f016890c510e93f935261169d9e3f565436429830faf0934f4f8e4', createdAt: '2025-01-01' },
-    { id: 'U_N', name: 'Nurse', username: 'n', email: '', lineId: '', role: 'nurse',
+    { id: 'U_N', name: 'Nurse', username: 'n', email: '', lineId: '', role: 'nurse', status: 'active',
         passHash: '1b16b1df538ba12dc3f97edbb85caa7050d46c148134290feba80f8236c83db9', createdAt: '2025-01-01' },
-    { id: 'U_S', name: 'Other Staff', username: 's', email: '', lineId: '', role: 'staff',
+    { id: 'U_S', name: 'Other Staff', username: 's', email: '', lineId: '', role: 'staff', status: 'active',
         passHash: '043a718774c572bd8a25adbeb1bfcd5c0256ae11cecf9f9c3f925d0e52beaf89', createdAt: '2025-01-01' },
 ];
 function loadUsers() {
@@ -104,8 +120,19 @@ function LoginPage({ onLogin, onGoRegister }) {
             setLoading(false);
             return;
         }
-        const session = { id: u.id, name: u.name, role: u.role, email: u.email, lineId: u.lineId };
+        if (u.status === 'pending') {
+            setErr('บัญชีนี้รอการอนุมัติจากแพทย์ กรุณารอการยืนยัน');
+            setLoading(false);
+            return;
+        }
+        if (u.status === 'inactive') {
+            setErr('บัญชีนี้ถูกระงับการใช้งาน กรุณาติดต่อผู้ดูแลระบบ');
+            setLoading(false);
+            return;
+        }
+        const session = { id: u.id, name: u.name, role: u.role, email: u.email, lineId: u.lineId, username: u.username };
         saveSession(session);
+        addAuditEntry({ user: u.username || u.name, action: 'login', module: 'ระบบ', detail: 'เข้าสู่ระบบ' });
         setLoading(false);
         onLogin(session);
     });
@@ -142,7 +169,6 @@ function RegisterPage_Auth({ onSuccess, onGoLogin }) {
     const [username, setUsername] = React.useState('');
     const [email, setEmail] = React.useState('');
     const [lineId, setLineId] = React.useState('');
-    const [role, setRole] = React.useState('nurse');
     const [pass, setPass] = React.useState('');
     const [pass2, setPass2] = React.useState('');
     const [err, setErr] = React.useState('');
@@ -187,7 +213,7 @@ function RegisterPage_Auth({ onSuccess, onGoLogin }) {
         const emailLower = email.trim().toLowerCase();
         const lineLower = lineId.trim().toLowerCase();
         const usernameLower = username.trim().toLowerCase();
-        if (usernameLower && users.find(u => u.username === usernameLower)) {
+        if (users.find(u => u.username === usernameLower)) {
             setErr('ชื่อผู้ใช้นี้ถูกใช้แล้ว');
             setLoading(false);
             return;
@@ -203,51 +229,44 @@ function RegisterPage_Auth({ onSuccess, onGoLogin }) {
             return;
         }
         const hash = yield sha256(pass);
-        const newUser = { id: 'U' + Date.now(), name: name.trim(), username: usernameLower, email: emailLower, lineId: lineLower, role, passHash: hash, createdAt: new Date().toISOString() };
+        const newUser = { id: 'U' + Date.now(), name: name.trim(), username: usernameLower, email: emailLower, lineId: lineLower,
+            role: 'pending', status: 'pending', passHash: hash, createdAt: new Date().toISOString() };
         saveUsers([...users, newUser]);
+        addAuditEntry({ user: usernameLower, action: 'register', module: 'ระบบ', detail: 'สมัครสมาชิกใหม่ — รอการอนุมัติ' });
         setLoading(false);
         onSuccess();
     });
-    const roles = [
-        { k: 'doctor', l: '👨‍⚕️ แพทย์', desc: 'เข้าถึงทุกหน้าในระบบ' },
-        { k: 'nurse', l: '👩‍⚕️ พยาบาล', desc: 'หน้าหลัก, ลงทะเบียน, นัดหมาย, ใบรับรองแพทย์, ใบเสร็จ' },
-        { k: 'staff', l: '🧑‍💼 เจ้าหน้าที่อื่นๆ', desc: 'หน้าหลัก, ลงทะเบียน, นัดหมาย' },
-    ];
     return (React.createElement("div", { style: { minHeight: '100vh', background: 'linear-gradient(135deg,#1a5276 0%,#2e86c1 60%,#1a8a5e 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, fontFamily: "'Sarabun','Noto Sans Thai',sans-serif" } },
-        React.createElement("div", { style: { width: '100%', maxWidth: 480 } },
+        React.createElement("div", { style: { width: '100%', maxWidth: 460 } },
             React.createElement("div", { style: { background: '#fff', borderRadius: 18, boxShadow: '0 20px 60px rgba(0,0,0,0.25)', padding: '36px 36px 30px', position: 'relative', overflow: 'hidden' } },
                 React.createElement("div", { style: { position: 'absolute', top: 0, left: 0, right: 0, height: 5, background: 'linear-gradient(90deg,#1a5276,#2e86c1,#1a8a5e)' } }),
                 React.createElement("div", { style: { textAlign: 'center', marginBottom: 20 } },
                     React.createElement("img", { src: CLINIC_LOGO, alt: "logo", style: { width: 60, height: 60, objectFit: 'contain', borderRadius: '50%', border: '3px solid #e8f4fd', padding: 3, marginBottom: 8 } }),
                     React.createElement("div", { style: { fontWeight: 700, fontSize: 16, color: '#1a5276' } }, CLINIC_NAME)),
-                React.createElement("div", { style: { fontSize: 15, fontWeight: 700, color: '#2c3e50', marginBottom: 18, textAlign: 'center' } }, "\uD83D\uDCDD \u0E2A\u0E21\u0E31\u0E04\u0E23\u0E2A\u0E21\u0E32\u0E0A\u0E34\u0E01\u0E43\u0E2B\u0E21\u0E48"),
+                React.createElement("div", { style: { fontSize: 15, fontWeight: 700, color: '#2c3e50', marginBottom: 8, textAlign: 'center' } }, "\uD83D\uDCDD \u0E2A\u0E21\u0E31\u0E04\u0E23\u0E2A\u0E21\u0E32\u0E0A\u0E34\u0E01\u0E43\u0E2B\u0E21\u0E48"),
+                React.createElement("div", { style: { background: '#fff8e1', border: '1px solid #f39c12', borderRadius: 8, padding: '8px 13px', fontSize: 12, color: '#856404', marginBottom: 16, textAlign: 'center' } }, "\u23F3 \u0E1A\u0E31\u0E0D\u0E0A\u0E35\u0E43\u0E2B\u0E21\u0E48\u0E15\u0E49\u0E2D\u0E07\u0E23\u0E2D\u0E01\u0E32\u0E23\u0E2D\u0E19\u0E38\u0E21\u0E31\u0E15\u0E34\u0E08\u0E32\u0E01\u0E41\u0E1E\u0E17\u0E22\u0E4C\u0E01\u0E48\u0E2D\u0E19\u0E43\u0E0A\u0E49\u0E07\u0E32\u0E19"),
                 err && React.createElement("div", { style: { background: '#fadbd8', border: '1px solid #e74c3c', borderRadius: 8, padding: '9px 14px', fontSize: 13, color: '#c0392b', marginBottom: 14 } }, err),
-                React.createElement("div", { style: { marginBottom: 13 } },
+                React.createElement("div", { style: { marginBottom: 12 } },
                     React.createElement("label", { style: { fontSize: 12, fontWeight: 600, color: '#2c3e50', display: 'block', marginBottom: 4 } }, "\u0E0A\u0E37\u0E48\u0E2D-\u0E19\u0E32\u0E21\u0E2A\u0E01\u0E38\u0E25 *"),
                     React.createElement("input", { value: name, onChange: e => setName(e.target.value), placeholder: "\u0E0A\u0E37\u0E48\u0E2D-\u0E19\u0E32\u0E21\u0E2A\u0E01\u0E38\u0E25", style: { width: '100%', padding: '9px 13px', border: '1.5px solid #d0d7de', borderRadius: 8, fontSize: 14, fontFamily: 'inherit', outline: 'none' }, onFocus: e => e.target.style.borderColor = '#2e86c1', onBlur: e => e.target.style.borderColor = '#d0d7de' })),
-                React.createElement("div", { style: { marginBottom: 13 } },
+                React.createElement("div", { style: { marginBottom: 12 } },
                     React.createElement("label", { style: { fontSize: 12, fontWeight: 600, color: '#2c3e50', display: 'block', marginBottom: 4 } },
                         "\u0E0A\u0E37\u0E48\u0E2D\u0E1C\u0E39\u0E49\u0E43\u0E0A\u0E49 (Username) * ",
                         React.createElement("span", { style: { fontSize: 10, color: '#7f8c8d', fontWeight: 400 } }, "\u0E43\u0E0A\u0E49\u0E2A\u0E33\u0E2B\u0E23\u0E31\u0E1A\u0E40\u0E02\u0E49\u0E32\u0E2A\u0E39\u0E48\u0E23\u0E30\u0E1A\u0E1A")),
-                    React.createElement("input", { value: username, onChange: e => setUsername(e.target.value), placeholder: "\u0E40\u0E0A\u0E48\u0E19: nurse01, doctor_a", style: { width: '100%', padding: '9px 13px', border: '1.5px solid #d0d7de', borderRadius: 8, fontSize: 14, fontFamily: 'inherit', outline: 'none' }, onFocus: e => e.target.style.borderColor = '#2e86c1', onBlur: e => e.target.style.borderColor = '#d0d7de' })),
-                React.createElement("div", { style: { marginBottom: 13 } },
-                    React.createElement("label", { style: { fontSize: 12, fontWeight: 600, color: '#2c3e50', display: 'block', marginBottom: 6 } }, "\u0E15\u0E33\u0E41\u0E2B\u0E19\u0E48\u0E07 / \u0E1A\u0E17\u0E1A\u0E32\u0E17 *"),
-                    React.createElement("div", { style: { display: 'flex', gap: 8, flexDirection: 'column' } }, roles.map(r => (React.createElement("label", { key: r.k, style: { display: 'flex', alignItems: 'flex-start', gap: 10, padding: '10px 13px', border: `1.5px solid ${role === r.k ? '#2e86c1' : '#d0d7de'}`, borderRadius: 8, cursor: 'pointer', background: role === r.k ? '#e8f4fd' : '#fff', transition: 'all 0.15s' } },
-                        React.createElement("input", { type: "radio", name: "role", value: r.k, checked: role === r.k, onChange: () => setRole(r.k), style: { marginTop: 3, flexShrink: 0 } }),
-                        React.createElement("div", null,
-                            React.createElement("div", { style: { fontWeight: 700, fontSize: 13, color: role === r.k ? '#1a5276' : '#2c3e50' } }, r.l),
-                            React.createElement("div", { style: { fontSize: 11, color: '#7f8c8d', marginTop: 2 } }, r.desc))))))),
-                React.createElement("div", { style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 13 } },
+                    React.createElement("input", { value: username, onChange: e => setUsername(e.target.value), placeholder: "\u0E40\u0E0A\u0E48\u0E19: nurse01", style: { width: '100%', padding: '9px 13px', border: '1.5px solid #d0d7de', borderRadius: 8, fontSize: 14, fontFamily: 'inherit', outline: 'none' }, onFocus: e => e.target.style.borderColor = '#2e86c1', onBlur: e => e.target.style.borderColor = '#d0d7de' })),
+                React.createElement("div", { style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 4 } },
                     React.createElement("div", null,
                         React.createElement("label", { style: { fontSize: 12, fontWeight: 600, color: '#2c3e50', display: 'block', marginBottom: 4 } }, "\u0E2D\u0E35\u0E40\u0E21\u0E25"),
                         React.createElement("input", { value: email, onChange: e => setEmail(e.target.value), placeholder: "example@email.com", type: "email", style: { width: '100%', padding: '9px 13px', border: '1.5px solid #d0d7de', borderRadius: 8, fontSize: 13, fontFamily: 'inherit', outline: 'none' }, onFocus: e => e.target.style.borderColor = '#2e86c1', onBlur: e => e.target.style.borderColor = '#d0d7de' })),
                     React.createElement("div", null,
                         React.createElement("label", { style: { fontSize: 12, fontWeight: 600, color: '#2c3e50', display: 'block', marginBottom: 4 } }, "LINE ID"),
                         React.createElement("input", { value: lineId, onChange: e => setLineId(e.target.value), placeholder: "line_id \u0E02\u0E2D\u0E07\u0E04\u0E38\u0E13", style: { width: '100%', padding: '9px 13px', border: '1.5px solid #d0d7de', borderRadius: 8, fontSize: 13, fontFamily: 'inherit', outline: 'none' }, onFocus: e => e.target.style.borderColor = '#2e86c1', onBlur: e => e.target.style.borderColor = '#d0d7de' }))),
-                React.createElement("div", { style: { fontSize: 11, color: '#7f8c8d', marginTop: -8, marginBottom: 13 } }, "* \u0E15\u0E49\u0E2D\u0E07\u0E01\u0E23\u0E2D\u0E01\u0E2D\u0E22\u0E48\u0E32\u0E07\u0E19\u0E49\u0E2D\u0E22 1 \u0E2D\u0E22\u0E48\u0E32\u0E07 (\u0E2D\u0E35\u0E40\u0E21\u0E25 \u0E2B\u0E23\u0E37\u0E2D LINE ID)"),
-                React.createElement("div", { style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 20, position: 'relative' } },
+                React.createElement("div", { style: { fontSize: 11, color: '#7f8c8d', marginBottom: 12 } }, "* \u0E15\u0E49\u0E2D\u0E07\u0E01\u0E23\u0E2D\u0E01\u0E2D\u0E22\u0E48\u0E32\u0E07\u0E19\u0E49\u0E2D\u0E22 1 \u0E2D\u0E22\u0E48\u0E32\u0E07 (\u0E2D\u0E35\u0E40\u0E21\u0E25 \u0E2B\u0E23\u0E37\u0E2D LINE ID)"),
+                React.createElement("div", { style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 20 } },
                     React.createElement("div", null,
-                        React.createElement("label", { style: { fontSize: 12, fontWeight: 600, color: '#2c3e50', display: 'block', marginBottom: 4 } }, "\u0E23\u0E2B\u0E31\u0E2A\u0E1C\u0E48\u0E32\u0E19 *"),
+                        React.createElement("label", { style: { fontSize: 12, fontWeight: 600, color: '#2c3e50', display: 'block', marginBottom: 4 } },
+                            "\u0E23\u0E2B\u0E31\u0E2A\u0E1C\u0E48\u0E32\u0E19 * ",
+                            React.createElement("span", { style: { fontSize: 10, color: '#7f8c8d', fontWeight: 400 } }, "(\u0E2D\u0E22\u0E48\u0E32\u0E07\u0E19\u0E49\u0E2D\u0E22 6 \u0E15\u0E31\u0E27)")),
                         React.createElement("div", { style: { position: 'relative' } },
                             React.createElement("input", { value: pass, onChange: e => setPass(e.target.value), type: showPass ? 'text' : 'password', placeholder: "\u0E2D\u0E22\u0E48\u0E32\u0E07\u0E19\u0E49\u0E2D\u0E22 6 \u0E15\u0E31\u0E27", style: { width: '100%', padding: '9px 36px 9px 13px', border: '1.5px solid #d0d7de', borderRadius: 8, fontSize: 13, fontFamily: 'inherit', outline: 'none' }, onFocus: e => e.target.style.borderColor = '#2e86c1', onBlur: e => e.target.style.borderColor = '#d0d7de' }),
                             React.createElement("button", { onClick: () => setShowPass(v => !v), style: { position: 'absolute', right: 9, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', fontSize: 14, color: '#7f8c8d' } }, showPass ? '🙈' : '👁️'))),
@@ -266,8 +285,10 @@ function AppRoot() {
     const [session, setSession] = React.useState(() => loadSession());
     const handleLogin = (s) => { setSession(s); };
     const handleLogout = () => {
+        const s = loadSession();
+        if (s)
+            addAuditEntry({ user: s.username || s.name, action: 'logout', module: 'ระบบ', detail: 'ออกจากระบบ' });
         saveSession(null);
-        // Hard reload — clears all React state, back button goes nowhere meaningful
         window.location.reload();
     };
     const handleRegisterSuccess = () => { alert('✅ สมัครสมาชิกสำเร็จ! กรุณาเข้าสู่ระบบ'); setAuthPage('login'); };
@@ -846,11 +867,14 @@ function ClinicDashboard({ session, onLogout }) {
     }, [dbReady]);
     // ── CRUD helpers that update both state and DB
     const savePatient = (p) => __awaiter(this, void 0, void 0, function* () {
+        const existed = patients.some(x => x.hn === p.hn);
         setPatients(prev => {
             const exists = prev.find(x => x.hn === p.hn);
             return exists ? prev.map(x => x.hn === p.hn ? p : x) : [...prev, p];
         });
         yield supa.upsert('patients', p);
+        addAuditEntry({ user: (session === null || session === void 0 ? void 0 : session.username) || (session === null || session === void 0 ? void 0 : session.name), action: existed ? 'edit' : 'create',
+            module: 'เวชระเบียน', detail: `${existed ? 'แก้ไข' : 'เพิ่ม'}ข้อมูลผู้ป่วย HN ${p.hn} — ${p.name}` });
     });
     const saveVisit = (v) => __awaiter(this, void 0, void 0, function* () {
         // Check BEFORE setState — setState updater runs async so can't rely on closure var
@@ -890,10 +914,12 @@ function ClinicDashboard({ session, onLogout }) {
             return;
         setVisits(prev => prev.filter(v => v.id !== id));
         yield supa.delete('visits', 'id', id);
+        addAuditEntry({ user: (session === null || session === void 0 ? void 0 : session.username) || (session === null || session === void 0 ? void 0 : session.name), action: 'delete', module: 'ตรวจรักษา', detail: `ลบประวัติการตรวจ ID ${id}` });
     });
     const saveReceipt = (r) => __awaiter(this, void 0, void 0, function* () {
         setReceipts(prev => [...prev, r]);
         yield supa.upsert('receipts', toDbReceipt(r));
+        addAuditEntry({ user: (session === null || session === void 0 ? void 0 : session.username) || (session === null || session === void 0 ? void 0 : session.name), action: 'create', module: 'ใบเสร็จ', detail: `สร้างใบเสร็จ ${r.id} ผู้ป่วย HN ${r.hn}` });
     });
     // Update an existing receipt (e.g. confirm payment / change payment method)
     const updateReceipt = (r) => __awaiter(this, void 0, void 0, function* () {
@@ -905,28 +931,36 @@ function ClinicDashboard({ session, onLogout }) {
             return;
         setReceipts(prev => prev.filter(x => x.id !== id));
         yield supa.delete('receipts', 'id', id);
+        addAuditEntry({ user: (session === null || session === void 0 ? void 0 : session.username) || (session === null || session === void 0 ? void 0 : session.name), action: 'delete', module: 'ใบเสร็จ', detail: `ลบใบเสร็จ ID ${id}` });
     });
     const saveAppointment = (a) => __awaiter(this, void 0, void 0, function* () {
+        const existed = appointments.some(x => x.id === a.id);
         setAppointments(prev => {
             const exists = prev.find(x => x.id === a.id);
             return exists ? prev.map(x => x.id === a.id ? a : x) : [...prev, a];
         });
         yield supa.upsert('appointments', a);
+        addAuditEntry({ user: (session === null || session === void 0 ? void 0 : session.username) || (session === null || session === void 0 ? void 0 : session.name), action: existed ? 'edit' : 'create', module: 'นัดหมาย', detail: `${existed ? 'แก้ไข' : 'เพิ่ม'}นัดหมาย ${a.id} HN ${a.hn}` });
     });
     const deleteAppointment = (id) => __awaiter(this, void 0, void 0, function* () {
         setAppointments(prev => prev.filter(a => a.id !== id));
         yield supa.delete('appointments', 'id', id);
+        addAuditEntry({ user: (session === null || session === void 0 ? void 0 : session.username) || (session === null || session === void 0 ? void 0 : session.name), action: 'delete', module: 'นัดหมาย', detail: `ลบนัดหมาย ID ${id}` });
     });
     const saveMedicine = (m) => __awaiter(this, void 0, void 0, function* () {
+        const existed = medicines.some(x => x.id === m.id);
         setMedicines(prev => {
             const exists = prev.find(x => x.id === m.id);
             return exists ? prev.map(x => x.id === m.id ? m : x) : [...prev, m];
         });
         yield supa.upsert('medicines', m);
+        addAuditEntry({ user: (session === null || session === void 0 ? void 0 : session.username) || (session === null || session === void 0 ? void 0 : session.name), action: existed ? 'edit' : 'create', module: 'คลังยา', detail: `${existed ? 'แก้ไข' : 'เพิ่ม'}ยา ${m.name}` });
     });
     const deleteMedicine = (id) => __awaiter(this, void 0, void 0, function* () {
+        const m = medicines.find(x => x.id === id);
         setMedicines(prev => prev.filter(m => m.id !== id));
         yield supa.delete('medicines', 'id', id);
+        addAuditEntry({ user: (session === null || session === void 0 ? void 0 : session.username) || (session === null || session === void 0 ? void 0 : session.name), action: 'delete', module: 'คลังยา', detail: `ลบยา ${(m === null || m === void 0 ? void 0 : m.name) || id}` });
     });
     const patchMedicineStock = (medId, newStock) => __awaiter(this, void 0, void 0, function* () {
         setMedicines(prev => prev.map(m => m.id === medId ? Object.assign(Object.assign({}, m), { stock: newStock }) : m));
@@ -969,6 +1003,7 @@ function ClinicDashboard({ session, onLogout }) {
         { key: 'appoint', icon: '📅', label: 'การนัดหมาย' },
         { key: 'accounting', icon: '💼', label: 'บัญชี' },
         { key: 'pharmacy', icon: '💊', label: 'คลังยาและเวชภัณฑ์' },
+        { key: 'users', icon: '👥', label: 'จัดการผู้ใช้' },
     ];
     const NAV = NAV_ALL.filter(n => canAccess(n.key));
     return (React.createElement("div", { style: { minHeight: '100vh', background: '#eef2f7', fontFamily: "'Sarabun','Noto Sans Thai',sans-serif" } },
@@ -1058,10 +1093,259 @@ END $$;`),
             page === 'receipt' && canAccess('receipt') && React.createElement(ReceiptPage, { receipts: receipts, saveReceipt: saveReceipt, updateReceipt: updateReceipt, deleteReceipt: deleteReceipt, patients: patients, visits: visits, nextRID: nextRID, getPatient: getPatient, medicines: medicines, patchMedicineStock: patchMedicineStock }),
             page === 'appoint' && canAccess('appoint') && React.createElement(AppointPage, { appointments: appointments, saveAppointment: saveAppointment, deleteAppointment: deleteAppointment, patients: patients, nextAID: nextAID, getPatient: getPatient, today: todayStr }),
             page === 'accounting' && canAccess('accounting') && React.createElement(AccountingPage, { receipts: receipts, today: todayStr }),
-            page === 'pharmacy' && canAccess('pharmacy') && React.createElement(PharmacyPage, { medicines: medicines, saveMedicine: saveMedicine, deleteMedicine: deleteMedicine, receipts: receipts, treatmentServices: treatmentServices, saveTreatmentService: saveTreatmentService, deleteTreatmentService: deleteTreatmentService })),
+            page === 'pharmacy' && canAccess('pharmacy') && React.createElement(PharmacyPage, { medicines: medicines, saveMedicine: saveMedicine, deleteMedicine: deleteMedicine, receipts: receipts, treatmentServices: treatmentServices, saveTreatmentService: saveTreatmentService, deleteTreatmentService: deleteTreatmentService }),
+            page === 'users' && canAccess('users') && React.createElement(UserManagePage, { session: session })),
         certModal && React.createElement(CertModal, { data: certModal, onClose: () => setCertModal(null), getPatient: getPatient }),
         receiptModal && React.createElement(ReceiptQuickModal, { data: receiptModal, onClose: () => setReceiptModal(null), getPatient: getPatient, nextRID: nextRID, receipts: receipts, saveReceipt: saveReceipt, medicines: medicines, patchMedicineStock: patchMedicineStock }),
         appointModal && React.createElement(AppointQuickModal, { data: appointModal, onClose: () => setAppointModal(null), getPatient: getPatient, appointments: appointments, saveAppointment: saveAppointment, nextAID: nextAID })));
+}
+// ===================== USER MANAGEMENT PAGE =====================
+function UserManagePage({ session }) {
+    const { useState, useEffect } = React;
+    const [users, setUsers] = useState(loadUsers());
+    const [tab, setTab] = useState('users'); // 'users' | 'audit'
+    const [auditLog, setAuditLog] = useState(loadAuditLog());
+    const [auditPage, setAuditPage] = useState(1);
+    const AUDIT_PER_PAGE = 15;
+    // Audit filter state
+    const [auditSearch, setAuditSearch] = useState('');
+    const [auditDateFrom, setAuditDateFrom] = useState('');
+    const [auditDateTo, setAuditDateTo] = useState('');
+    const [auditUser, setAuditUser] = useState('');
+    const refresh = () => { setUsers(loadUsers()); setAuditLog(loadAuditLog()); };
+    const approve = (uid, role) => {
+        const all = loadUsers();
+        const u = all.find(x => x.id === uid);
+        if (!u)
+            return;
+        const before = `status=${u.status},role=${u.role}`;
+        const updated = Object.assign(Object.assign({}, u), { status: 'active', role });
+        const nonTest = all.filter(x => !TEST_ACCOUNTS.find(t => t.id === x.id));
+        const idx = nonTest.findIndex(x => x.id === uid);
+        if (idx >= 0)
+            nonTest[idx] = updated;
+        saveUsers([...TEST_ACCOUNTS, ...nonTest]);
+        addAuditEntry({ user: session.username || session.name, action: 'approve', module: 'จัดการผู้ใช้',
+            detail: `อนุมัติบัญชี ${u.username} กำหนด role: ${role}`, before: before, after: `status=active,role=${role}` });
+        refresh();
+    };
+    const reject = (uid) => {
+        const all = loadUsers();
+        const u = all.find(x => x.id === uid);
+        if (!u)
+            return;
+        const nonTest = all.filter(x => !TEST_ACCOUNTS.find(t => t.id === x.id));
+        const updated = Object.assign(Object.assign({}, u), { status: 'rejected' });
+        const idx = nonTest.findIndex(x => x.id === uid);
+        if (idx >= 0)
+            nonTest[idx] = updated;
+        saveUsers([...TEST_ACCOUNTS, ...nonTest]);
+        addAuditEntry({ user: session.username || session.name, action: 'reject', module: 'จัดการผู้ใช้',
+            detail: `ปฏิเสธบัญชี ${u.username}` });
+        refresh();
+    };
+    const toggleActive = (uid) => {
+        const all = loadUsers();
+        if (TEST_ACCOUNTS.find(t => t.id === uid)) {
+            alert('ไม่สามารถแก้ไขบัญชีทดสอบได้');
+            return;
+        }
+        const nonTest = all.filter(x => !TEST_ACCOUNTS.find(t => t.id === x.id));
+        const u = nonTest.find(x => x.id === uid);
+        if (!u)
+            return;
+        const newStatus = u.status === 'active' ? 'inactive' : 'active';
+        const idx = nonTest.findIndex(x => x.id === uid);
+        nonTest[idx] = Object.assign(Object.assign({}, u), { status: newStatus });
+        saveUsers([...TEST_ACCOUNTS, ...nonTest]);
+        addAuditEntry({ user: session.username || session.name, action: 'edit', module: 'จัดการผู้ใช้',
+            detail: `${newStatus === 'active' ? 'เปิดใช้งาน' : 'ระงับ'}บัญชี ${u.username}`, before: `status=${u.status}`, after: `status=${newStatus}` });
+        refresh();
+    };
+    const changeRole = (uid, newRole) => {
+        const all = loadUsers();
+        if (TEST_ACCOUNTS.find(t => t.id === uid)) {
+            alert('ไม่สามารถแก้ไขบัญชีทดสอบได้');
+            return;
+        }
+        const nonTest = all.filter(x => !TEST_ACCOUNTS.find(t => t.id === x.id));
+        const u = nonTest.find(x => x.id === uid);
+        if (!u)
+            return;
+        const oldRole = u.role;
+        const idx = nonTest.findIndex(x => x.id === uid);
+        nonTest[idx] = Object.assign(Object.assign({}, u), { role: newRole });
+        saveUsers([...TEST_ACCOUNTS, ...nonTest]);
+        addAuditEntry({ user: session.username || session.name, action: 'edit', module: 'จัดการผู้ใช้',
+            detail: `เปลี่ยน role ของ ${u.username}`, before: `role=${oldRole}`, after: `role=${newRole}` });
+        refresh();
+    };
+    const deleteUser = (uid) => {
+        if (TEST_ACCOUNTS.find(t => t.id === uid)) {
+            alert('ไม่สามารถลบบัญชีทดสอบได้');
+            return;
+        }
+        if (!window.confirm('ยืนยันลบบัญชีผู้ใช้นี้?'))
+            return;
+        const all = loadUsers();
+        const u = all.find(x => x.id === uid);
+        const nonTest = all.filter(x => !TEST_ACCOUNTS.find(t => t.id === x.id) && x.id !== uid);
+        saveUsers([...TEST_ACCOUNTS, ...nonTest]);
+        addAuditEntry({ user: session.username || session.name, action: 'delete', module: 'จัดการผู้ใช้',
+            detail: `ลบบัญชี ${(u === null || u === void 0 ? void 0 : u.username) || uid}` });
+        refresh();
+    };
+    const statusLabel = (s) => ({ active: '✅ ใช้งาน', inactive: '🔴 ระงับ', pending: '⏳ รออนุมัติ', rejected: '❌ ปฏิเสธ' }[s] || s);
+    const roleLabel = (r) => ({ doctor: '👨‍⚕️ แพทย์', nurse: '👩‍⚕️ พยาบาล', staff: '🧑‍💼 เจ้าหน้าที่', pending: 'รอกำหนด', rejected: '—' }[r] || r);
+    // ── Filtered audit log
+    const filteredAudit = auditLog.filter(a => {
+        var _a;
+        const dateStr = a.ts ? a.ts.slice(0, 10) : '';
+        if (auditDateFrom && dateStr < auditDateFrom)
+            return false;
+        if (auditDateTo && dateStr > auditDateTo)
+            return false;
+        if (auditUser && !((_a = a.user) === null || _a === void 0 ? void 0 : _a.toLowerCase().includes(auditUser.toLowerCase())))
+            return false;
+        if (auditSearch) {
+            const q = auditSearch.toLowerCase();
+            return (a.user || '').toLowerCase().includes(q) || (a.action || '').toLowerCase().includes(q) ||
+                (a.module || '').toLowerCase().includes(q) || (a.detail || '').toLowerCase().includes(q);
+        }
+        return true;
+    });
+    const auditPages = Math.max(1, Math.ceil(filteredAudit.length / AUDIT_PER_PAGE));
+    const auditSlice = filteredAudit.slice((auditPage - 1) * AUDIT_PER_PAGE, auditPage * AUDIT_PER_PAGE);
+    const actionColor = (a) => ({ login: '#1a5276', logout: '#7f8c8d', register: '#1e8449', approve: '#27ae60',
+        reject: '#e74c3c', delete: '#c0392b', edit: '#e67e22', create: '#2980b9' }[a] || '#555');
+    const actionLabel = (a) => ({ login: 'เข้าสู่ระบบ', logout: 'ออกจากระบบ', register: 'สมัครสมาชิก',
+        approve: 'อนุมัติบัญชี', reject: 'ปฏิเสธ', delete: 'ลบ', edit: 'แก้ไข', create: 'เพิ่ม' }[a] || a);
+    const thaiDateTime = (ts) => {
+        if (!ts)
+            return '';
+        const d = new Date(ts);
+        const thMonths = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
+        return `${d.getDate()} ${thMonths[d.getMonth()]} ${d.getFullYear() + 543} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+    };
+    const pending = users.filter(u => u.status === 'pending');
+    return (React.createElement("div", null,
+        React.createElement("div", { className: "card", style: { marginBottom: 12, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 } },
+            React.createElement("div", { style: { fontWeight: 700, fontSize: 16, color: 'var(--primary)' } }, "\uD83D\uDC65 \u0E08\u0E31\u0E14\u0E01\u0E32\u0E23\u0E1C\u0E39\u0E49\u0E43\u0E0A\u0E49\u0E41\u0E25\u0E30\u0E2A\u0E34\u0E17\u0E18\u0E34\u0E4C"),
+            React.createElement("div", { style: { display: 'flex', gap: 8 } },
+                React.createElement("button", { className: `btn btn-sm ${tab === 'users' ? 'btn-primary' : 'btn-outline'}`, onClick: () => { setTab('users'); refresh(); } },
+                    "\uD83D\uDC64 \u0E1C\u0E39\u0E49\u0E43\u0E0A\u0E49 (",
+                    users.length,
+                    ")"),
+                React.createElement("button", { className: `btn btn-sm ${tab === 'audit' ? 'btn-primary' : 'btn-outline'}`, onClick: () => { setTab('audit'); refresh(); } },
+                    "\uD83D\uDCCB \u0E1A\u0E31\u0E19\u0E17\u0E36\u0E01\u0E01\u0E34\u0E08\u0E01\u0E23\u0E23\u0E21 ",
+                    pending.length > 0 && React.createElement("span", { style: { background: '#e74c3c', color: '#fff', borderRadius: 10, padding: '1px 6px', fontSize: 10, marginLeft: 4 } }, pending.length)))),
+        pending.length > 0 && tab === 'users' && (React.createElement("div", { style: { background: '#fff8e1', border: '1px solid #f39c12', borderRadius: 8, padding: '10px 16px', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 10 } },
+            React.createElement("span", { style: { fontSize: 18 } }, "\u23F3"),
+            React.createElement("span", { style: { fontSize: 13, color: '#856404', fontWeight: 600 } },
+                "\u0E21\u0E35 ",
+                pending.length,
+                " \u0E1A\u0E31\u0E0D\u0E0A\u0E35\u0E23\u0E2D\u0E2D\u0E19\u0E38\u0E21\u0E31\u0E15\u0E34"))),
+        tab === 'users' && (React.createElement("div", { className: "card" },
+            React.createElement("div", { style: { overflowX: 'auto' } },
+                React.createElement("table", { style: { width: '100%', borderCollapse: 'collapse', fontSize: 13 } },
+                    React.createElement("thead", null,
+                        React.createElement("tr", { style: { background: 'var(--primary)', color: '#fff' } },
+                            React.createElement("th", { style: { padding: '9px 12px', textAlign: 'left' } }, "\u0E0A\u0E37\u0E48\u0E2D\u0E1C\u0E39\u0E49\u0E43\u0E0A\u0E49"),
+                            React.createElement("th", { style: { padding: '9px 12px', textAlign: 'left' } }, "\u0E0A\u0E37\u0E48\u0E2D-\u0E19\u0E32\u0E21\u0E2A\u0E01\u0E38\u0E25"),
+                            React.createElement("th", { style: { padding: '9px 12px', textAlign: 'left' } }, "\u0E15\u0E34\u0E14\u0E15\u0E48\u0E2D"),
+                            React.createElement("th", { style: { padding: '9px 12px', textAlign: 'center' } }, "\u0E2A\u0E16\u0E32\u0E19\u0E30"),
+                            React.createElement("th", { style: { padding: '9px 12px', textAlign: 'center' } }, "Role"),
+                            React.createElement("th", { style: { padding: '9px 12px', textAlign: 'left' } }, "\u0E27\u0E31\u0E19\u0E17\u0E35\u0E48\u0E2A\u0E21\u0E31\u0E04\u0E23"),
+                            React.createElement("th", { style: { padding: '9px 12px', textAlign: 'center' } }, "\u0E08\u0E31\u0E14\u0E01\u0E32\u0E23"))),
+                    React.createElement("tbody", null, users.map((u, i) => {
+                        const isTest = !!TEST_ACCOUNTS.find(t => t.id === u.id);
+                        return (React.createElement("tr", { key: u.id, style: { background: u.status === 'pending' ? '#fff8e1' : i % 2 === 0 ? '#fff' : 'var(--gray-pale)', borderLeft: u.status === 'pending' ? '3px solid #f39c12' : '3px solid transparent' } },
+                            React.createElement("td", { style: { padding: '8px 12px', fontWeight: 600, color: 'var(--primary)' } },
+                                u.username || '-',
+                                isTest && React.createElement("span", { style: { fontSize: 10, background: '#dfe6e9', borderRadius: 4, padding: '1px 5px', marginLeft: 5, color: '#636e72' } }, "seed")),
+                            React.createElement("td", { style: { padding: '8px 12px' } }, u.name),
+                            React.createElement("td", { style: { padding: '8px 12px', fontSize: 12, color: 'var(--gray)' } },
+                                u.email && React.createElement("div", null, u.email),
+                                u.lineId && React.createElement("div", null,
+                                    "LINE: ",
+                                    u.lineId),
+                                !u.email && !u.lineId && '-'),
+                            React.createElement("td", { style: { padding: '8px 12px', textAlign: 'center' } },
+                                React.createElement("span", { style: { fontSize: 12, fontWeight: 600, color: u.status === 'active' ? '#1e8449' : u.status === 'pending' ? '#856404' :
+                                            u.status === 'rejected' ? '#c0392b' : '#636e72' } }, statusLabel(u.status || 'active'))),
+                            React.createElement("td", { style: { padding: '8px 12px', textAlign: 'center' } }, u.status === 'pending' ? (React.createElement("div", { style: { display: 'flex', gap: 4, justifyContent: 'center', flexWrap: 'wrap' } }, ['doctor', 'nurse', 'staff'].map(r => (React.createElement("button", { key: r, onClick: () => approve(u.id, r), style: { fontSize: 11, padding: '3px 8px', background: r === 'doctor' ? '#1a5276' : r === 'nurse' ? '#1e8449' : '#e67e22',
+                                    color: '#fff', border: 'none', borderRadius: 5, cursor: 'pointer', whiteSpace: 'nowrap' } },
+                                "\u0E2D\u0E19\u0E38\u0E21\u0E31\u0E15\u0E34/",
+                                roleLabel(r).replace(/[^฀-๿\w]/g, '').trim() || r))))) : (React.createElement("select", { value: u.role || 'staff', disabled: isTest, onChange: e => changeRole(u.id, e.target.value), style: { fontSize: 12, padding: '3px 6px', borderRadius: 5, border: '1px solid #d0d7de', background: isTest ? '#f5f5f5' : '#fff', cursor: isTest ? 'default' : 'pointer' } },
+                                React.createElement("option", { value: "doctor" }, "\uD83D\uDC68\u200D\u2695\uFE0F \u0E41\u0E1E\u0E17\u0E22\u0E4C"),
+                                React.createElement("option", { value: "nurse" }, "\uD83D\uDC69\u200D\u2695\uFE0F \u0E1E\u0E22\u0E32\u0E1A\u0E32\u0E25"),
+                                React.createElement("option", { value: "staff" }, "\uD83E\uDDD1\u200D\uD83D\uDCBC \u0E40\u0E08\u0E49\u0E32\u0E2B\u0E19\u0E49\u0E32\u0E17\u0E35\u0E48")))),
+                            React.createElement("td", { style: { padding: '8px 12px', fontSize: 12, color: 'var(--gray)' } }, u.createdAt ? u.createdAt.slice(0, 10) : '-'),
+                            React.createElement("td", { style: { padding: '8px 12px', textAlign: 'center' } },
+                                React.createElement("div", { style: { display: 'flex', gap: 4, justifyContent: 'center', flexWrap: 'wrap' } },
+                                    u.status === 'pending' && (React.createElement("button", { onClick: () => reject(u.id), className: "btn btn-danger btn-sm" }, "\u274C \u0E1B\u0E0F\u0E34\u0E40\u0E2A\u0E18")),
+                                    u.status !== 'pending' && !isTest && (React.createElement("button", { onClick: () => toggleActive(u.id), className: `btn btn-sm ${u.status === 'active' ? 'btn-outline' : 'btn-primary'}`, style: { fontSize: 11 } }, u.status === 'active' ? '🔴 ระงับ' : '✅ เปิด')),
+                                    !isTest && (React.createElement("button", { onClick: () => deleteUser(u.id), className: "btn btn-danger btn-sm", style: { fontSize: 11 } }, "\uD83D\uDDD1\uFE0F"))))));
+                    })))))),
+        tab === 'audit' && (React.createElement("div", null,
+            React.createElement("div", { className: "card", style: { marginBottom: 12 } },
+                React.createElement("div", { style: { fontWeight: 600, fontSize: 13, color: 'var(--primary)', marginBottom: 10 } }, "\uD83D\uDD0D \u0E04\u0E49\u0E19\u0E2B\u0E32\u0E41\u0E25\u0E30\u0E01\u0E23\u0E2D\u0E07"),
+                React.createElement("div", { style: { display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' } },
+                    React.createElement("div", null,
+                        React.createElement("label", { style: { fontSize: 11, display: 'block', marginBottom: 3, color: 'var(--gray)' } }, "\u0E04\u0E49\u0E19\u0E2B\u0E32"),
+                        React.createElement("input", { value: auditSearch, onChange: e => { setAuditSearch(e.target.value); setAuditPage(1); }, placeholder: "\u0E0A\u0E37\u0E48\u0E2D\u0E1C\u0E39\u0E49\u0E43\u0E0A\u0E49, action, module...", style: { padding: '7px 11px', border: '1px solid #d0d7de', borderRadius: 7, fontSize: 13, width: 200, fontFamily: 'inherit' } })),
+                    React.createElement("div", null,
+                        React.createElement("label", { style: { fontSize: 11, display: 'block', marginBottom: 3, color: 'var(--gray)' } }, "\u0E1C\u0E39\u0E49\u0E43\u0E0A\u0E49"),
+                        React.createElement("input", { value: auditUser, onChange: e => { setAuditUser(e.target.value); setAuditPage(1); }, placeholder: "\u0E0A\u0E37\u0E48\u0E2D\u0E1C\u0E39\u0E49\u0E43\u0E0A\u0E49...", style: { padding: '7px 11px', border: '1px solid #d0d7de', borderRadius: 7, fontSize: 13, width: 140, fontFamily: 'inherit' } })),
+                    React.createElement("div", null,
+                        React.createElement("label", { style: { fontSize: 11, display: 'block', marginBottom: 3, color: 'var(--gray)' } }, "\u0E15\u0E31\u0E49\u0E07\u0E41\u0E15\u0E48\u0E27\u0E31\u0E19\u0E17\u0E35\u0E48"),
+                        React.createElement("input", { type: "date", value: auditDateFrom, onChange: e => { setAuditDateFrom(e.target.value); setAuditPage(1); }, style: { padding: '7px 11px', border: '1px solid #d0d7de', borderRadius: 7, fontSize: 13 } })),
+                    React.createElement("div", null,
+                        React.createElement("label", { style: { fontSize: 11, display: 'block', marginBottom: 3, color: 'var(--gray)' } }, "\u0E16\u0E36\u0E07\u0E27\u0E31\u0E19\u0E17\u0E35\u0E48"),
+                        React.createElement("input", { type: "date", value: auditDateTo, onChange: e => { setAuditDateTo(e.target.value); setAuditPage(1); }, style: { padding: '7px 11px', border: '1px solid #d0d7de', borderRadius: 7, fontSize: 13 } })),
+                    React.createElement("button", { onClick: () => { setAuditSearch(''); setAuditUser(''); setAuditDateFrom(''); setAuditDateTo(''); setAuditPage(1); }, className: "btn btn-outline btn-sm" }, "\u0E25\u0E49\u0E32\u0E07")),
+                React.createElement("div", { style: { marginTop: 8, fontSize: 12, color: 'var(--gray)' } },
+                    "\u0E1E\u0E1A ",
+                    React.createElement("b", { style: { color: 'var(--primary)' } }, filteredAudit.length),
+                    " \u0E23\u0E32\u0E22\u0E01\u0E32\u0E23",
+                    ' ',
+                    "(\u0E41\u0E2A\u0E14\u0E07 ",
+                    Math.min((auditPage - 1) * AUDIT_PER_PAGE + 1, filteredAudit.length),
+                    "\u2013",
+                    Math.min(auditPage * AUDIT_PER_PAGE, filteredAudit.length),
+                    ")")),
+            React.createElement("div", { className: "card" },
+                auditSlice.length === 0 && React.createElement("div", { style: { padding: 20, textAlign: 'center', color: 'var(--gray)' } }, "\u0E44\u0E21\u0E48\u0E1E\u0E1A\u0E23\u0E32\u0E22\u0E01\u0E32\u0E23"),
+                auditSlice.map((a, i) => (React.createElement("div", { key: a.id || i, style: { borderBottom: '1px solid var(--gray-pale)', padding: '10px 0', display: 'flex', gap: 12, alignItems: 'flex-start' } },
+                    React.createElement("div", { style: { flexShrink: 0, width: 8, height: 8, borderRadius: '50%', background: actionColor(a.action), marginTop: 6 } }),
+                    React.createElement("div", { style: { flex: 1, minWidth: 0 } },
+                        React.createElement("div", { style: { display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', marginBottom: 3 } },
+                            React.createElement("span", { style: { fontWeight: 700, fontSize: 13, color: 'var(--primary)' } }, a.user || '?'),
+                            React.createElement("span", { style: { fontSize: 11, padding: '2px 7px', borderRadius: 10, background: actionColor(a.action), color: '#fff', fontWeight: 600 } }, actionLabel(a.action)),
+                            React.createElement("span", { style: { fontSize: 12, color: 'var(--gray-dark)' } }, a.module || ''),
+                            React.createElement("span", { style: { fontSize: 11, color: 'var(--gray)', marginLeft: 'auto' } }, thaiDateTime(a.ts))),
+                        React.createElement("div", { style: { fontSize: 12, color: 'var(--gray-dark)' } }, a.detail || ''),
+                        (a.before || a.after) && (React.createElement("div", { style: { fontSize: 11, color: 'var(--gray)', marginTop: 3, background: 'var(--gray-pale)', borderRadius: 5, padding: '3px 8px', display: 'inline-block' } },
+                            a.before && React.createElement("span", null,
+                                "\u0E01\u0E48\u0E2D\u0E19: ",
+                                React.createElement("b", null, a.before)),
+                            a.before && a.after && React.createElement("span", { style: { margin: '0 6px' } }, "\u2192"),
+                            a.after && React.createElement("span", null,
+                                "\u0E2B\u0E25\u0E31\u0E07: ",
+                                React.createElement("b", null, a.after)))))))),
+                auditPages > 1 && (React.createElement("div", { style: { display: 'flex', gap: 6, justifyContent: 'center', alignItems: 'center', paddingTop: 14, flexWrap: 'wrap' } },
+                    React.createElement("button", { className: "btn btn-outline btn-sm", disabled: auditPage === 1, onClick: () => setAuditPage(1) }, "\u00AB"),
+                    React.createElement("button", { className: "btn btn-outline btn-sm", disabled: auditPage === 1, onClick: () => setAuditPage(p => p - 1) }, "\u2039 \u0E01\u0E48\u0E2D\u0E19\u0E2B\u0E19\u0E49\u0E32"),
+                    Array.from({ length: Math.min(auditPages, 7) }, (_, i) => {
+                        const p = auditPage <= 4 ? i + 1 : auditPage + i - 3;
+                        if (p < 1 || p > auditPages)
+                            return null;
+                        return (React.createElement("button", { key: p, onClick: () => setAuditPage(p), style: { minWidth: 32, padding: '4px 8px', fontSize: 12, fontWeight: p === auditPage ? 700 : 400,
+                                background: p === auditPage ? 'var(--primary)' : '#fff', color: p === auditPage ? '#fff' : 'var(--primary)',
+                                border: '1px solid var(--primary)', borderRadius: 5, cursor: 'pointer' } }, p));
+                    }),
+                    React.createElement("button", { className: "btn btn-outline btn-sm", disabled: auditPage === auditPages, onClick: () => setAuditPage(p => p + 1) }, "\u0E16\u0E31\u0E14\u0E44\u0E1B \u203A"),
+                    React.createElement("button", { className: "btn btn-outline btn-sm", disabled: auditPage === auditPages, onClick: () => setAuditPage(auditPages) }, "\u00BB"))))))));
 }
 // ===================== DASHBOARD =====================
 function DashboardPage({ todayVisits, todayAppoints, lowStock, monthRevenue, patients, visits, appointments, medicines, receipts, today }) {
