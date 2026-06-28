@@ -302,12 +302,8 @@ function AppRoot() {
   const handleLogin=(s)=>{setSession(s);};
   const handleLogout=()=>{
     saveSession(null);
-    // Push a new history entry so back button can't return to app
-    if(window.history && window.history.replaceState) {
-      window.history.replaceState(null,'','');
-    }
-    setSession(null);
-    setAuthPage('login');
+    // Hard reload — clears all React state, back button goes nowhere meaningful
+    window.location.reload();
   };
   const handleRegisterSuccess=()=>{alert('✅ สมัครสมาชิกสำเร็จ! กรุณาเข้าสู่ระบบ');setAuthPage('login');};
 
@@ -4838,3 +4834,21 @@ function Modal({title,onClose,children,width=600}) {
     </div>
   );
 }
+
+// ===================== MOUNT =====================
+// Always mount AppRoot (auth gate) — never ClinicDashboard directly.
+// Works whether the HTML calls this or uses its own render.
+(function() {
+  const container = document.getElementById('root') || document.getElementById('app') || (function() {
+    const d = document.createElement('div');
+    d.id = 'root';
+    document.body.appendChild(d);
+    return d;
+  })();
+  const root = ReactDOM.createRoot ? ReactDOM.createRoot(container) : null;
+  if (root) {
+    root.render(React.createElement(AppRoot));
+  } else {
+    ReactDOM.render(React.createElement(AppRoot), container);
+  }
+})();
