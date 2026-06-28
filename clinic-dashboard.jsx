@@ -42,6 +42,15 @@ function addAuditEntry(entry) {
   localStorage.setItem(AUDIT_KEY, JSON.stringify(logs.slice(0,1000)));
 }
 
+// ── Drug prescription templates (localStorage)
+const DRUG_TEMPLATES_KEY = 'clinic_drug_templates_v1';
+const loadDrugTemplates = () => {
+  try { return JSON.parse(localStorage.getItem(DRUG_TEMPLATES_KEY)||'[]'); } catch(_) { return []; }
+};
+const saveDrugTemplates = (tpls) => {
+  try { localStorage.setItem(DRUG_TEMPLATES_KEY, JSON.stringify(tpls)); } catch(_) {}
+};
+
 // Seed test accounts — SHA-256 hashes verified with Node.js crypto
 // sha256('d') = 18ac3e7343f016890c510e93f935261169d9e3f565436429830faf0934f4f8e4
 // sha256('n') = 1b16b1df538ba12dc3f97edbb85caa7050d46c148134290feba80f8236c83db9
@@ -512,7 +521,7 @@ const toDbVisit = (v) => ({
 
 const fromDbReceipt = (r) => r ? ({
   id:r.id, hn:r.hn, visitId:r.visit_id, patname:r.patname, date:r.date,
-  items: Array.isArray(r.items) ? r.items : (r.items ? JSON.parse(r.items) : []),
+  items: Array.isArray(r.items) ? r.items : (()=>{ try{ return r.items ? JSON.parse(r.items) : []; } catch(_){ return []; } })(),
   discount:r.discount||0, paid:r.paid||'เงินสด', status:r.status||'รอชำระ',
 }) : null;
 
@@ -1442,7 +1451,6 @@ function DashboardPage({todayVisits,todayAppoints,lowStock,monthRevenue,patients
           {icon:'👤',label:'ผู้ป่วยทั้งหมด',value:patients.length+' ราย',color:'var(--primary)'},
           {icon:'🩺',label:'ตรวจวันนี้',value:todayVisits+' ราย',color:'var(--accent)'},
           {icon:'📅',label:'นัดวันนี้',value:todayAppoints+' ราย',color:'#8e44ad'},
-          {icon:'💰',label:'รายรับเดือนนี้',value:(monthRevenue).toLocaleString()+' บ.',color:'var(--warning)'},
           {icon:'⚠️',label:'ยาใกล้หมด',value:lowStock+' รายการ',color:'var(--danger)'},
         ].map((s,i)=>(
           <div key={i} className="card" style={{textAlign:'center',padding:'18px 10px'}}>
@@ -2812,14 +2820,25 @@ function DrugAutocomplete({medicines,onAdd,allergyList}) {
   const [q,setQ]=useState('');
   const [open,setOpen]=useState(false);
   const [pending,setPending]=useState(null); // med waiting for instruction confirm
+  const [templates,setTemplates]=useState(()=>loadDrugTemplates());
   const ref=useRef(null);
+
+  // Reload templates from storage whenever the component is focused
+  const refreshTemplates=()=>setTemplates(loadDrugTemplates());
 
   const isAllergic=(name)=>{
     if(!allergyList||allergyList==='-') return false;
     return allergyList.toLowerCase().split(/[\s,;/]+/).filter(a=>a.length>2).some(a=>name.toLowerCase().includes(a));
   };
 
-  const matches = q.trim().length>0
+  // "." triggers template mode; any other text searches medicines
+  const showingTemplates = q.trim()==='.' || q.trim().startsWith('.');
+  const templateFilter = showingTemplates && q.trim().length>1 ? q.trim().slice(1).toLowerCase() : '';
+  const filteredTemplates = templates.filter(t=>
+    !templateFilter || t.name.toLowerCase().includes(templateFilter)
+  );
+
+  const matches = (!showingTemplates && q.trim().length>0)
     ? medicines.filter(m=>m.name.toLowerCase().includes(q.toLowerCase())).slice(0,12)
     : [];
 
@@ -2840,19 +2859,83 @@ function DrugAutocomplete({medicines,onAdd,allergyList}) {
     setPending(null);
   };
 
+  // Apply a template: add all its medicines to the prescription
+  const applyTemplate=(tpl)=>{
+    setQ('');
+    setOpen(false);
+    let addedCount=0;
+    tpl.medicines.forEach(mi=>{
+      const med=medicines.find(m=>m.id===mi.medId);
+      if(!med) return; // skip if medicine no longer in inventory
+      onAdd({
+        name: mi.name||med.name,
+        qty: mi.qty||1,
+        unit: mi.unit||med.unit,
+        freq: mi.freq||'',
+        price: mi.price!=null?mi.price:med.price,
+        medId: med.id,
+        stock: med.stock,
+      });
+      addedCount++;
+    });
+    if(addedCount>0){
+      alert(`✅ ใช้ Template "${tpl.name}" — เพิ่มยา ${addedCount} รายการในรายการสั่งยาเรียบร้อย\n\nหมายเหตุ: สต๊อกจะถูกหักเมื่อออกใบเสร็จ`);
+    } else {
+      alert(`⚠️ Template "${tpl.name}" ไม่พบยาในคลัง — กรุณาตรวจสอบรายการยาใน Template`);
+    }
+  };
+
   return (
     <>
       <div ref={ref} style={{background:'#f0faf8',border:'1.5px solid #a8d5c8',borderRadius:8,padding:'10px 12px',marginBottom:10}}>
         <div style={{fontWeight:700,fontSize:12,color:'#1e8449',marginBottom:8}}>
           💊 เพิ่มยาจากคลังยา
           <span style={{fontWeight:400,color:'#888',marginLeft:8,fontSize:11}}>เลือกยา → ระบุวิธีใช้ → ยืนยัน</span>
+          <span style={{fontWeight:600,color:'#1a5276',marginLeft:8,fontSize:11,background:'#e8f0ff',borderRadius:4,padding:'1px 6px'}}>
+            💡 กด "." เพื่อเลือก Template ยา
+          </span>
         </div>
         <div style={{position:'relative'}}>
-          <input value={q} onChange={e=>{setQ(e.target.value);setOpen(true);}} onFocus={()=>setOpen(true)}
-            placeholder="🔍 พิมพ์ชื่อยา: amoxy, augm, para, omep, lorat..."
+          <input value={q}
+            onChange={e=>{setQ(e.target.value);setOpen(true);if(e.target.value==='.')refreshTemplates();}}
+            onFocus={()=>{setOpen(true);if(q==='.')refreshTemplates();}}
+            placeholder='🔍 ชื่อยา: amoxy, para, omep... | กด "." เพื่อเลือก Template'
             style={{fontSize:13,width:'100%',paddingRight:32}} />
           {q&&<button onClick={()=>{setQ('');setOpen(false);}} style={{position:'absolute',right:6,top:'50%',transform:'translateY(-50%)',background:'none',border:'none',cursor:'pointer',color:'#999',fontSize:16,lineHeight:1}}>×</button>}
-          {open&&matches.length>0&&(
+
+          {/* Template dropdown */}
+          {open&&showingTemplates&&(
+            <div className="drug-dropdown">
+              <div style={{padding:'7px 12px',background:'#1a5276',color:'#fff',fontSize:11,fontWeight:700,display:'flex',alignItems:'center',gap:6}}>
+                📋 Template ยา {templateFilter&&`— ค้นหา: "${templateFilter}"`}
+                <span style={{marginLeft:'auto',fontWeight:400,opacity:0.8}}>คลิกเพื่อใช้</span>
+              </div>
+              {filteredTemplates.length===0&&(
+                <div style={{padding:'12px 12px',color:'#888',fontSize:12,textAlign:'center'}}>
+                  ไม่พบ Template{templateFilter?` "${templateFilter}"`:''}
+                  <br/><span style={{fontSize:11}}>สร้าง Template ได้ที่ คลังยา → Template ยา</span>
+                </div>
+              )}
+              {filteredTemplates.map(tpl=>(
+                <div key={tpl.id}
+                  className="drug-item"
+                  onClick={()=>applyTemplate(tpl)}
+                  style={{flexDirection:'column',alignItems:'flex-start',gap:3}}>
+                  <div style={{display:'flex',width:'100%',justifyContent:'space-between',alignItems:'center'}}>
+                    <b style={{fontSize:13,color:'#1a5276'}}>📋 {tpl.name}</b>
+                    <span style={{background:'#1a5276',color:'#fff',borderRadius:10,padding:'1px 8px',fontSize:10,fontWeight:600}}>{tpl.medicines.length} รายการ</span>
+                  </div>
+                  <div style={{fontSize:11,color:'#666',width:'100%'}}>
+                    {tpl.medicines.slice(0,3).map(m=>m.name).join(', ')}{tpl.medicines.length>3?'...':''}
+                  </div>
+                  {tpl.note&&<div style={{fontSize:10,color:'#888'}}>{tpl.note}</div>}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Medicine search dropdown */}
+          {open&&!showingTemplates&&matches.length>0&&(
             <div className="drug-dropdown">
               {matches.map(m=>{
                 const isLow=m.stock<=m.minstock;
@@ -2877,7 +2960,7 @@ function DrugAutocomplete({medicines,onAdd,allergyList}) {
               })}
             </div>
           )}
-          {open&&q.trim().length>0&&matches.length===0&&(
+          {open&&!showingTemplates&&q.trim().length>0&&matches.length===0&&(
             <div className="drug-dropdown">
               <div style={{padding:'10px 12px',color:'#888',fontSize:12}}>ไม่พบยาในคลัง "{q}"</div>
             </div>
@@ -4582,7 +4665,7 @@ function AccountingPage({receipts,today}) {
   const [r0,r1]=getRange();
   const inRange=(d)=>d>=r0&&d<=r1;
 
-  const filtIncome=receipts.filter(r=>inRange(r.date));
+  const filtIncome=receipts.filter(r=>inRange(r.date)&&r.status==='ชำระแล้ว');
   const filtExp=expenses.filter(e=>inRange(e.date));
   const totalIncome=filtIncome.reduce((s,r)=>s+r.items.reduce((t,i)=>t+i.qty*i.price,0)-r.discount,0);
   const totalExpense=filtExp.reduce((s,e)=>s+e.amount,0);
@@ -4759,6 +4842,30 @@ function PharmacyPage({medicines,saveMedicine,deleteMedicine,receipts,treatmentS
   const [svcEdit,setSvcEdit]=useState(null);
   const [svcAdding,setSvcAdding]=useState(false);
   const SVC_CATS=['ค่าตรวจ','ค่าหัตถการ','ค่าตรวจพิเศษ','เอกสาร','อื่นๆ'];
+  // Drug template state
+  const [templates,setTemplates]=useState(()=>loadDrugTemplates());
+  const [tplEdit,setTplEdit]=useState(null);
+  const [tplAdding,setTplAdding]=useState(false);
+  const refreshTemplates=()=>setTemplates(loadDrugTemplates());
+  const saveTemplate=(tpl)=>{
+    const all=loadDrugTemplates();
+    if(tpl.id){
+      const idx=all.findIndex(t=>t.id===tpl.id);
+      if(idx>=0) all[idx]=tpl; else all.push(tpl);
+    } else {
+      all.push({...tpl,id:'TPL'+Date.now()});
+    }
+    saveDrugTemplates(all);
+    refreshTemplates();
+    setTplEdit(null);setTplAdding(false);
+  };
+  const deleteTemplate=(id)=>{
+    if(!window.confirm('ยืนยันลบ Template นี้?'))return;
+    const all=loadDrugTemplates().filter(t=>t.id!==id);
+    saveDrugTemplates(all);
+    refreshTemplates();
+  };
+
   const saveService=async(f)=>{
     const svc=f.id?f:{...f,id:'S'+pad((treatmentServices||[]).length+1,3),active:true};
     await saveTreatmentService(svc);
@@ -4820,9 +4927,14 @@ function PharmacyPage({medicines,saveMedicine,deleteMedicine,receipts,treatmentS
             style={{padding:'5px 12px',fontSize:12,fontWeight:600,border:'none',borderRadius:6,cursor:'pointer',fontFamily:'inherit',background:tab==='services'?'#1e8449':'transparent',color:tab==='services'?'#fff':'#1e8449',boxShadow:tab==='services'?'none':'inset 0 0 0 1.5px #1e8449'}}>
             🏥 รายการหัตถการ
           </button>
+          <button onClick={()=>{setTab('templates');refreshTemplates();}}
+            style={{padding:'5px 12px',fontSize:12,fontWeight:600,border:'none',borderRadius:6,cursor:'pointer',fontFamily:'inherit',background:tab==='templates'?'#6c3483':'transparent',color:tab==='templates'?'#fff':'#6c3483',boxShadow:tab==='templates'?'none':'inset 0 0 0 1.5px #6c3483'}}>
+            📋 Template ยา
+          </button>
           <button className={`btn btn-sm ${tab==='report'?'btn-primary':'btn-outline'}`} onClick={()=>setTab('report')}>📊 รายงาน</button>
           {tab==='stock'&&<button className="btn btn-accent btn-sm" onClick={()=>setAdding(true)}>+ เพิ่มรายการยา</button>}
           {tab==='services'&&<button onClick={()=>setSvcAdding(true)} style={{padding:'5px 12px',fontSize:12,fontWeight:700,border:'none',borderRadius:6,cursor:'pointer',fontFamily:'inherit',background:'#1e8449',color:'#fff'}}>+ เพิ่มรายการหัตถการ</button>}
+          {tab==='templates'&&<button onClick={()=>{setTplEdit(null);setTplAdding(true);}} style={{padding:'5px 12px',fontSize:12,fontWeight:700,border:'none',borderRadius:6,cursor:'pointer',fontFamily:'inherit',background:'#6c3483',color:'#fff'}}>+ สร้าง Template ใหม่</button>}
         </div>
       </div>
       {/* Alerts */}
@@ -5042,6 +5154,186 @@ function PharmacyPage({medicines,saveMedicine,deleteMedicine,receipts,treatmentS
           </div>
         </div>
       )}
+      {tab==='templates'&&(
+        <div>
+          {/* Info banner */}
+          <div style={{background:'#f3e8ff',border:'1px solid #9b59b6',borderRadius:8,padding:'10px 14px',marginBottom:12,fontSize:12,color:'#6c3483'}}>
+            💡 <b>Template ยา</b> คือชุดคำสั่งยาสำเร็จรูปสำหรับโรคที่พบบ่อย ช่วยให้สั่งยาได้รวดเร็ว
+            <br/>📌 การสร้าง Template <b>ไม่หักสต๊อก</b> — สต๊อกจะถูกหักเมื่อออกใบเสร็จจริงเท่านั้น
+            <br/>🔑 ในหน้าตรวจรักษา พิมพ์ <b>"."</b> ในช่องค้นหายาเพื่อเลือก Template
+          </div>
+
+          {/* Create/Edit Template Form */}
+          {(tplAdding||tplEdit)&&(
+            <DrugTemplateForm
+              form={tplEdit||{name:'',note:'',medicines:[]}}
+              medicines={medicines}
+              onSave={saveTemplate}
+              onCancel={()=>{setTplAdding(false);setTplEdit(null);}}
+            />
+          )}
+
+          {/* Template list */}
+          {templates.length===0&&!tplAdding&&!tplEdit&&(
+            <div className="card" style={{textAlign:'center',padding:30,color:'var(--gray)'}}>
+              <div style={{fontSize:40,marginBottom:8}}>📋</div>
+              <div style={{fontWeight:600,fontSize:14}}>ยังไม่มี Template ยา</div>
+              <div style={{fontSize:13,marginTop:4}}>กดปุ่ม "+ สร้าง Template ใหม่" เพื่อเพิ่มชุดยาสำเร็จรูป</div>
+            </div>
+          )}
+          {templates.length>0&&(
+            <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(300px,1fr))',gap:12}}>
+              {templates.map(tpl=>(
+                <div key={tpl.id} className="card" style={{border:'1.5px solid #d7b6f7',padding:'14px 16px'}}>
+                  <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:8}}>
+                    <div>
+                      <div style={{fontWeight:700,fontSize:14,color:'#6c3483'}}>📋 {tpl.name}</div>
+                      {tpl.note&&<div style={{fontSize:11,color:'var(--gray)',marginTop:2}}>{tpl.note}</div>}
+                    </div>
+                    <div style={{display:'flex',gap:4,flexShrink:0}}>
+                      <button className="btn btn-outline btn-sm" style={{padding:'3px 10px',fontSize:11,color:'#6c3483',borderColor:'#6c3483'}} onClick={()=>{setTplAdding(false);setTplEdit({...tpl});}}>✏️ แก้ไข</button>
+                      <button className="btn btn-danger btn-sm" style={{padding:'3px 10px',fontSize:11}} onClick={()=>deleteTemplate(tpl.id)}>ลบ</button>
+                    </div>
+                  </div>
+                  <div style={{fontSize:12,color:'var(--gray-dark)',marginBottom:6}}>รายการยา ({tpl.medicines.length} รายการ):</div>
+                  <div style={{display:'flex',flexDirection:'column',gap:5}}>
+                    {tpl.medicines.map((mi,i)=>{
+                      const med=medicines.find(m=>m.id===mi.medId);
+                      return (
+                        <div key={i} style={{background:'#f8f0ff',borderRadius:5,padding:'5px 9px',fontSize:12}}>
+                          <div style={{fontWeight:600,color:'#1a5276'}}>{mi.name}</div>
+                          <div style={{color:'#666',marginTop:1}}>จำนวน: {mi.qty} {mi.unit} | ราคา: {mi.price}฿/หน่วย</div>
+                          {mi.freq&&<div style={{color:'#555',marginTop:1,fontSize:11}}>{mi.freq}</div>}
+                          {!med&&<div style={{color:'var(--danger)',fontSize:10}}>⚠️ ไม่พบยาในคลัง</div>}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ===================== DRUG TEMPLATE FORM =====================
+function DrugTemplateForm({form,medicines,onSave,onCancel}) {
+  const [f,setF]=useState({name:form.name||'',note:form.note||'',medicines:[...(form.medicines||[])],id:form.id||''});
+  const [medSearch,setMedSearch]=useState('');
+  const [medOpen,setMedOpen]=useState(false);
+  const medRef=useRef(null);
+
+  useEffect(()=>{
+    const h=e=>{if(medRef.current&&!medRef.current.contains(e.target))setMedOpen(false);};
+    document.addEventListener('mousedown',h);
+    return()=>document.removeEventListener('mousedown',h);
+  },[]);
+
+  const medMatches=medSearch.trim().length>0
+    ? medicines.filter(m=>m.name.toLowerCase().includes(medSearch.toLowerCase())).slice(0,10)
+    : [];
+
+  const addMed=(med)=>{
+    if(f.medicines.find(m=>m.medId===med.id)){alert('ยานี้มีอยู่ใน Template แล้ว');return;}
+    setF(prev=>({...prev,medicines:[...prev.medicines,{medId:med.id,name:med.name,qty:10,unit:med.unit,price:med.price,freq:''}]}));
+    setMedSearch('');setMedOpen(false);
+  };
+  const updMedItem=(i,k,v)=>setF(prev=>({...prev,medicines:prev.medicines.map((m,idx)=>idx===i?{...m,[k]:k==='qty'||k==='price'?Number(v):v}:m)}));
+  const rmMedItem=(i)=>setF(prev=>({...prev,medicines:prev.medicines.filter((_,idx)=>idx!==i)}));
+
+  const doSave=()=>{
+    if(!f.name.trim()){alert('กรุณาใส่ชื่อ Template');return;}
+    if(f.medicines.length===0){alert('กรุณาเพิ่มยาอย่างน้อย 1 รายการ');return;}
+    onSave({...f});
+  };
+
+  return (
+    <div className="card" style={{marginBottom:14,background:'#faf0ff',border:'2px solid #9b59b6'}}>
+      <div style={{fontWeight:700,color:'#6c3483',marginBottom:12,fontSize:14}}>{f.id?'✏️ แก้ไข Template':'📋 สร้าง Template ยาใหม่'}</div>
+      <div style={{background:'#e8d5f7',borderRadius:6,padding:'7px 12px',marginBottom:10,fontSize:11,color:'#6c3483'}}>
+        ℹ️ Template ไม่หักสต๊อก — สต๊อกจะถูกหักเมื่อออกใบเสร็จเท่านั้น
+      </div>
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:10}}>
+        <div style={{gridColumn:'span 2'}}>
+          <label>ชื่อ Template * <span style={{fontWeight:400,color:'#888',fontSize:11}}>(เช่น สูตรไข้หวัดทั่วไป, สูตร URTI)</span></label>
+          <input value={f.name} onChange={e=>setF(p=>({...p,name:e.target.value}))} placeholder="ชื่อ Template" />
+        </div>
+        <div style={{gridColumn:'span 2'}}>
+          <label>หมายเหตุ / คำอธิบาย</label>
+          <input value={f.note} onChange={e=>setF(p=>({...p,note:e.target.value}))} placeholder="ใช้สำหรับ..." />
+        </div>
+      </div>
+
+      {/* Medicine search */}
+      <div ref={medRef} style={{position:'relative',marginBottom:10}}>
+        <label style={{color:'#6c3483',fontWeight:700}}>+ เพิ่มยาเข้า Template</label>
+        <input value={medSearch} onChange={e=>{setMedSearch(e.target.value);setMedOpen(true);}} onFocus={()=>setMedOpen(true)}
+          placeholder="🔍 พิมพ์ชื่อยา..." style={{borderColor:'#9b59b6'}} />
+        {medOpen&&medMatches.length>0&&(
+          <div style={{position:'absolute',top:'calc(100% + 2px)',left:0,right:0,background:'#fff',border:'1.5px solid #9b59b6',borderRadius:6,zIndex:600,boxShadow:'0 4px 18px rgba(0,0,0,0.13)',maxHeight:200,overflowY:'auto'}}>
+            {medMatches.map(m=>(
+              <div key={m.id} onClick={()=>addMed(m)}
+                style={{padding:'7px 12px',cursor:'pointer',borderBottom:'1px solid #f0f0f0',display:'flex',justifyContent:'space-between',fontSize:12}}
+                onMouseEnter={e=>e.currentTarget.style.background='#f3e8ff'}
+                onMouseLeave={e=>e.currentTarget.style.background='#fff'}>
+                <span><b>{m.name}</b> <span style={{color:'#888',fontSize:11}}>{m.category}</span></span>
+                <span style={{color:'#1e8449',fontWeight:600}}>{m.price}฿/{m.unit} | คงเหลือ {m.stock}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Medicine list in template */}
+      {f.medicines.length>0&&(
+        <div style={{border:'1.5px solid #d7b6f7',borderRadius:6,overflow:'hidden',marginBottom:10}}>
+          <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
+            <thead>
+              <tr style={{background:'#6c3483',color:'#fff'}}>
+                <th style={{padding:'6px 8px',textAlign:'left'}}>ชื่อยา</th>
+                <th style={{padding:'6px 8px',textAlign:'center',width:70}}>จำนวน</th>
+                <th style={{padding:'6px 8px',textAlign:'left',width:55}}>หน่วย</th>
+                <th style={{padding:'6px 8px',textAlign:'right',width:80}}>ราคา/หน่วย</th>
+                <th style={{padding:'6px 8px',textAlign:'left',minWidth:180}}>วิธีใช้ยา</th>
+                <th style={{width:28}}></th>
+              </tr>
+            </thead>
+            <tbody>
+              {f.medicines.map((mi,i)=>(
+                <tr key={i} style={{background:i%2===0?'#fff':'#fdf0ff'}}>
+                  <td style={{padding:'5px 8px',fontWeight:600,color:'#1a5276'}}>{mi.name}</td>
+                  <td style={{padding:'5px 6px'}}>
+                    <input type="number" value={mi.qty} min={1} onChange={e=>updMedItem(i,'qty',e.target.value)} style={{width:55,textAlign:'center',fontSize:12,padding:'2px 4px'}} />
+                  </td>
+                  <td style={{padding:'5px 6px'}}>
+                    <input value={mi.unit} onChange={e=>updMedItem(i,'unit',e.target.value)} style={{width:50,fontSize:12,padding:'2px 4px'}} />
+                  </td>
+                  <td style={{padding:'5px 6px'}}>
+                    <input type="number" value={mi.price} min={0} onChange={e=>updMedItem(i,'price',e.target.value)} style={{width:70,textAlign:'right',fontSize:12,padding:'2px 4px'}} />
+                  </td>
+                  <td style={{padding:'5px 6px'}}>
+                    <InstructionField value={mi.freq||''} onChange={val=>updMedItem(i,'freq',val)} />
+                  </td>
+                  <td style={{padding:'5px 4px',textAlign:'center'}}>
+                    <button onClick={()=>rmMedItem(i)} style={{background:'none',border:'none',color:'var(--danger)',cursor:'pointer',fontSize:14}}>✕</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {f.medicines.length===0&&(
+        <div style={{textAlign:'center',color:'#888',fontSize:12,padding:'10px 0',marginBottom:8}}>ยังไม่มียาใน Template — ค้นหาและเพิ่มยาด้านบน</div>
+      )}
+
+      <div style={{textAlign:'right',display:'flex',gap:8,justifyContent:'flex-end'}}>
+        <button className="btn btn-gray btn-sm" onClick={onCancel}>ยกเลิก</button>
+        <button onClick={doSave} style={{padding:'6px 18px',background:'#6c3483',color:'#fff',border:'none',borderRadius:6,cursor:'pointer',fontWeight:700,fontSize:13,fontFamily:'inherit'}}>💾 บันทึก Template</button>
+      </div>
     </div>
   );
 }

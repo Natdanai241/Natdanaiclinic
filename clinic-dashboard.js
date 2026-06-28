@@ -1,13 +1,4 @@
 "use strict";
-var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
-    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
-    return new (P || (P = Promise))(function (resolve, reject) {
-        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
-        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
-        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
-        step((generator = generator.apply(thisArg, _arguments || [])).next());
-    });
-};
 const { useState, useEffect, useRef } = React;
 const CLINIC_NAME = "คลินิกเวชกรรมแพทย์ณัฐดนัย";
 const CLINIC_ADDRESS = "101/2 หมู่ 12, ตำบลโป่งผา, อำเภอแม่สาย, จังหวัดเชียงราย, 57130";
@@ -28,11 +19,9 @@ const ROLE_ALLOWED = {
     staff: ['dashboard', 'register', 'cert', 'receipt', 'appoint'],
 };
 // Simple password hash (SHA-256 hex, computed client-side)
-function sha256(text) {
-    return __awaiter(this, void 0, void 0, function* () {
-        const buf = yield crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
-        return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
-    });
+async function sha256(text) {
+    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+    return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 // In-memory user store backed by localStorage key "clinic_users"
 const AUTH_KEY = 'clinic_users_v1';
@@ -53,6 +42,22 @@ function addAuditEntry(entry) {
     // Keep max 1000 entries
     localStorage.setItem(AUDIT_KEY, JSON.stringify(logs.slice(0, 1000)));
 }
+// ── Drug prescription templates (localStorage)
+const DRUG_TEMPLATES_KEY = 'clinic_drug_templates_v1';
+const loadDrugTemplates = () => {
+    try {
+        return JSON.parse(localStorage.getItem(DRUG_TEMPLATES_KEY) || '[]');
+    }
+    catch (_) {
+        return [];
+    }
+};
+const saveDrugTemplates = (tpls) => {
+    try {
+        localStorage.setItem(DRUG_TEMPLATES_KEY, JSON.stringify(tpls));
+    }
+    catch (_) { }
+};
 // Seed test accounts — SHA-256 hashes verified with Node.js crypto
 // sha256('d') = 18ac3e7343f016890c510e93f935261169d9e3f565436429830faf0934f4f8e4
 // sha256('n') = 1b16b1df538ba12dc3f97edbb85caa7050d46c148134290feba80f8236c83db9
@@ -104,14 +109,14 @@ function LoginPage({ onLogin, onGoRegister }) {
     const [err, setErr] = React.useState('');
     const [loading, setLoading] = React.useState(false);
     const [showPass, setShowPass] = React.useState(false);
-    const doLogin = () => __awaiter(this, void 0, void 0, function* () {
+    const doLogin = async () => {
         if (!ident.trim() || !pass.trim()) {
             setErr('กรุณากรอกข้อมูลให้ครบ');
             return;
         }
         setLoading(true);
         setErr('');
-        const hash = yield sha256(pass);
+        const hash = await sha256(pass);
         const users = loadUsers();
         const id = ident.trim().toLowerCase();
         const u = users.find(u => u.username === id || u.email === id || u.lineId === id);
@@ -135,7 +140,7 @@ function LoginPage({ onLogin, onGoRegister }) {
         addAuditEntry({ user: u.username || u.name, action: 'login', module: 'ระบบ', detail: 'เข้าสู่ระบบ' });
         setLoading(false);
         onLogin(session);
-    });
+    };
     return (React.createElement("div", { style: { minHeight: '100vh', background: 'linear-gradient(135deg,#1a5276 0%,#2e86c1 60%,#1a8a5e 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, fontFamily: "'Sarabun','Noto Sans Thai',sans-serif" } },
         React.createElement("style", null, `@import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700&display=swap');*{box-sizing:border-box;margin:0;padding:0;}body{font-family:'Sarabun',sans-serif;}`),
         React.createElement("div", { style: { width: '100%', maxWidth: 420 } },
@@ -174,7 +179,7 @@ function RegisterPage_Auth({ onSuccess, onGoLogin }) {
     const [err, setErr] = React.useState('');
     const [loading, setLoading] = React.useState(false);
     const [showPass, setShowPass] = React.useState(false);
-    const doRegister = () => __awaiter(this, void 0, void 0, function* () {
+    const doRegister = async () => {
         if (!name.trim()) {
             setErr('กรุณากรอกชื่อ-นามสกุล');
             return;
@@ -228,14 +233,14 @@ function RegisterPage_Auth({ onSuccess, onGoLogin }) {
             setLoading(false);
             return;
         }
-        const hash = yield sha256(pass);
+        const hash = await sha256(pass);
         const newUser = { id: 'U' + Date.now(), name: name.trim(), username: usernameLower, email: emailLower, lineId: lineLower,
             role: 'pending', status: 'pending', passHash: hash, createdAt: new Date().toISOString() };
         saveUsers([...users, newUser]);
         addAuditEntry({ user: usernameLower, action: 'register', module: 'ระบบ', detail: 'สมัครสมาชิกใหม่ — รอการอนุมัติ' });
         setLoading(false);
         onSuccess();
-    });
+    };
     return (React.createElement("div", { style: { minHeight: '100vh', background: 'linear-gradient(135deg,#1a5276 0%,#2e86c1 60%,#1a8a5e 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, fontFamily: "'Sarabun','Noto Sans Thai',sans-serif" } },
         React.createElement("div", { style: { width: '100%', maxWidth: 460 } },
             React.createElement("div", { style: { background: '#fff', borderRadius: 18, boxShadow: '0 20px 60px rgba(0,0,0,0.25)', padding: '36px 36px 30px', position: 'relative', overflow: 'hidden' } },
@@ -354,176 +359,166 @@ const supa = {
         return false;
     },
     // ── Generic fetch all rows from a table
-    getAll(table) {
-        return __awaiter(this, void 0, void 0, function* () {
-            try {
-                const r = yield fetch(`${SUPA_URL}/rest/v1/${table}?order=created_at.asc`, { headers: this.headers });
-                if (!r.ok) {
-                    console.error(`getAll ${table}:`, yield r.text());
-                    return null;
-                }
-                return r.json();
-            }
-            catch (e) {
-                console.error(`getAll ${table} network error:`, e);
+    async getAll(table) {
+        try {
+            const r = await fetch(`${SUPA_URL}/rest/v1/${table}?order=created_at.asc`, { headers: this.headers });
+            if (!r.ok) {
+                console.error(`getAll ${table}:`, await r.text());
                 return null;
             }
-        });
+            return r.json();
+        }
+        catch (e) {
+            console.error(`getAll ${table} network error:`, e);
+            return null;
+        }
     },
     // ── INSERT a single row (POST), retry on column mismatch up to 10 times
-    insert(table, data, _depth) {
-        return __awaiter(this, void 0, void 0, function* () {
-            _depth = _depth || 0;
-            const body = this._strip(table, data);
-            try {
-                const r = yield fetch(`${SUPA_URL}/rest/v1/${table}`, {
-                    method: "POST",
-                    headers: Object.assign(Object.assign({}, this.headers), { "Prefer": "return=representation" }),
-                    body: JSON.stringify(body),
-                });
-                if (!r.ok) {
-                    const errText = yield r.text();
-                    console.error(`insert ${table} [HTTP ${r.status}]:`, errText);
-                    if (this._isRlsError(r.status, errText)) {
-                        console.error(`insert ${table}: RLS/permission error — add INSERT policy for anon role`);
-                        return 'RLS_ERROR';
-                    }
-                    if (_depth < 10 && this._learnBadCol(table, errText)) {
-                        return this.insert(table, data, _depth + 1);
-                    }
-                    return null;
+    async insert(table, data, _depth) {
+        _depth = _depth || 0;
+        const body = this._strip(table, data);
+        try {
+            const r = await fetch(`${SUPA_URL}/rest/v1/${table}`, {
+                method: "POST",
+                headers: Object.assign(Object.assign({}, this.headers), { "Prefer": "return=representation" }),
+                body: JSON.stringify(body),
+            });
+            if (!r.ok) {
+                const errText = await r.text();
+                console.error(`insert ${table} [HTTP ${r.status}]:`, errText);
+                if (this._isRlsError(r.status, errText)) {
+                    console.error(`insert ${table}: RLS/permission error — add INSERT policy for anon role`);
+                    return 'RLS_ERROR';
                 }
-                return r.json();
-            }
-            catch (e) {
-                console.error(`insert ${table} network error:`, e);
+                if (_depth < 10 && this._learnBadCol(table, errText)) {
+                    return this.insert(table, data, _depth + 1);
+                }
                 return null;
             }
-        });
+            return r.json();
+        }
+        catch (e) {
+            console.error(`insert ${table} network error:`, e);
+            return null;
+        }
     },
     // ── PATCH (update) by primary key, retry on column mismatch
-    patch(table, pkCol, pkVal, data, _depth) {
-        return __awaiter(this, void 0, void 0, function* () {
-            _depth = _depth || 0;
-            const body = this._strip(table, data);
-            try {
-                const r = yield fetch(`${SUPA_URL}/rest/v1/${table}?${pkCol}=eq.${pkVal}`, {
-                    method: "PATCH",
-                    headers: Object.assign(Object.assign({}, this.headers), { "Prefer": "return=representation" }),
-                    body: JSON.stringify(body),
-                });
-                if (!r.ok) {
-                    const errText = yield r.text();
-                    console.error(`patch ${table} [HTTP ${r.status}]:`, errText);
-                    if (this._isRlsError(r.status, errText)) {
-                        console.error(`patch ${table}: RLS/permission error — add UPDATE policy for anon role`);
-                        return 'RLS_ERROR';
-                    }
-                    if (_depth < 10 && this._learnBadCol(table, errText)) {
-                        return this.patch(table, pkCol, pkVal, data, _depth + 1);
-                    }
-                    return null;
+    async patch(table, pkCol, pkVal, data, _depth) {
+        _depth = _depth || 0;
+        const body = this._strip(table, data);
+        try {
+            const r = await fetch(`${SUPA_URL}/rest/v1/${table}?${pkCol}=eq.${pkVal}`, {
+                method: "PATCH",
+                headers: Object.assign(Object.assign({}, this.headers), { "Prefer": "return=representation" }),
+                body: JSON.stringify(body),
+            });
+            if (!r.ok) {
+                const errText = await r.text();
+                console.error(`patch ${table} [HTTP ${r.status}]:`, errText);
+                if (this._isRlsError(r.status, errText)) {
+                    console.error(`patch ${table}: RLS/permission error — add UPDATE policy for anon role`);
+                    return 'RLS_ERROR';
                 }
-                return r.json();
-            }
-            catch (e) {
-                console.error(`patch ${table} network error:`, e);
+                if (_depth < 10 && this._learnBadCol(table, errText)) {
+                    return this.patch(table, pkCol, pkVal, data, _depth + 1);
+                }
                 return null;
             }
-        });
+            return r.json();
+        }
+        catch (e) {
+            console.error(`patch ${table} network error:`, e);
+            return null;
+        }
     },
     // ── Upsert: try INSERT first; if 409 conflict → PATCH instead
     // Also handles bulk arrays (for seed data) via old merge-duplicates method
-    upsert(table, data, _depth) {
-        return __awaiter(this, void 0, void 0, function* () {
-            _depth = _depth || 0;
-            // Bulk array path — use merge-duplicates as before
-            if (Array.isArray(data)) {
-                const body = data.map(row => this._strip(table, row));
-                try {
-                    const r = yield fetch(`${SUPA_URL}/rest/v1/${table}`, {
-                        method: "POST",
-                        headers: Object.assign(Object.assign({}, this.headers), { "Prefer": "resolution=merge-duplicates,return=representation" }),
-                        body: JSON.stringify(body),
-                    });
-                    if (!r.ok) {
-                        const errText = yield r.text();
-                        console.error(`upsert[] ${table} [HTTP ${r.status}]:`, errText);
-                        if (_depth < 10 && this._learnBadCol(table, errText)) {
-                            return this.upsert(table, data, _depth + 1);
-                        }
-                        return null;
-                    }
-                    return r.json();
-                }
-                catch (e) {
-                    console.error(`upsert[] ${table} network:`, e);
-                    return null;
-                }
-            }
-            // Single-row path: INSERT → on conflict (409 / 23505) → PATCH
-            const body = this._strip(table, data);
+    async upsert(table, data, _depth) {
+        _depth = _depth || 0;
+        // Bulk array path — use merge-duplicates as before
+        if (Array.isArray(data)) {
+            const body = data.map(row => this._strip(table, row));
             try {
-                const r = yield fetch(`${SUPA_URL}/rest/v1/${table}`, {
+                const r = await fetch(`${SUPA_URL}/rest/v1/${table}`, {
                     method: "POST",
-                    headers: Object.assign(Object.assign({}, this.headers), { "Prefer": "return=representation" }),
+                    headers: Object.assign(Object.assign({}, this.headers), { "Prefer": "resolution=merge-duplicates,return=representation" }),
                     body: JSON.stringify(body),
                 });
-                if (r.ok)
-                    return r.json();
-                const errText = yield r.text();
-                console.error(`upsert ${table} [HTTP ${r.status}]:`, errText);
-                // RLS / permission error
-                if (this._isRlsError(r.status, errText)) {
-                    console.error(`upsert ${table}: RLS/permission error — add policy for anon role`);
-                    return 'RLS_ERROR';
-                }
-                // Unknown column → strip and retry insert
-                if (_depth < 10 && this._learnBadCol(table, errText)) {
-                    return this.upsert(table, data, _depth + 1);
-                }
-                // Duplicate key (23505) or HTTP 409 → fall back to PATCH
-                let errObj = null;
-                try {
-                    errObj = JSON.parse(errText);
-                }
-                catch (_) { }
-                const pgCode = (errObj === null || errObj === void 0 ? void 0 : errObj.code) || '';
-                if (r.status === 409 || pgCode === '23505') {
-                    console.warn(`upsert ${table}: conflict on insert, falling back to PATCH`);
-                    const pkCol = 'id';
-                    const pkVal = data[pkCol];
-                    if (pkVal !== undefined) {
-                        return this.patch(table, pkCol, pkVal, data);
+                if (!r.ok) {
+                    const errText = await r.text();
+                    console.error(`upsert[] ${table} [HTTP ${r.status}]:`, errText);
+                    if (_depth < 10 && this._learnBadCol(table, errText)) {
+                        return this.upsert(table, data, _depth + 1);
                     }
+                    return null;
                 }
-                console.error(`upsert ${table} pg_error: code=${pgCode} msg=${(errObj === null || errObj === void 0 ? void 0 : errObj.message) || errText}`);
-                return null;
+                return r.json();
             }
             catch (e) {
-                console.error(`upsert ${table} network:`, e);
+                console.error(`upsert[] ${table} network:`, e);
                 return null;
             }
-        });
+        }
+        // Single-row path: INSERT → on conflict (409 / 23505) → PATCH
+        const body = this._strip(table, data);
+        try {
+            const r = await fetch(`${SUPA_URL}/rest/v1/${table}`, {
+                method: "POST",
+                headers: Object.assign(Object.assign({}, this.headers), { "Prefer": "return=representation" }),
+                body: JSON.stringify(body),
+            });
+            if (r.ok)
+                return r.json();
+            const errText = await r.text();
+            console.error(`upsert ${table} [HTTP ${r.status}]:`, errText);
+            // RLS / permission error
+            if (this._isRlsError(r.status, errText)) {
+                console.error(`upsert ${table}: RLS/permission error — add policy for anon role`);
+                return 'RLS_ERROR';
+            }
+            // Unknown column → strip and retry insert
+            if (_depth < 10 && this._learnBadCol(table, errText)) {
+                return this.upsert(table, data, _depth + 1);
+            }
+            // Duplicate key (23505) or HTTP 409 → fall back to PATCH
+            let errObj = null;
+            try {
+                errObj = JSON.parse(errText);
+            }
+            catch (_) { }
+            const pgCode = (errObj === null || errObj === void 0 ? void 0 : errObj.code) || '';
+            if (r.status === 409 || pgCode === '23505') {
+                console.warn(`upsert ${table}: conflict on insert, falling back to PATCH`);
+                const pkCol = 'id';
+                const pkVal = data[pkCol];
+                if (pkVal !== undefined) {
+                    return this.patch(table, pkCol, pkVal, data);
+                }
+            }
+            console.error(`upsert ${table} pg_error: code=${pgCode} msg=${(errObj === null || errObj === void 0 ? void 0 : errObj.message) || errText}`);
+            return null;
+        }
+        catch (e) {
+            console.error(`upsert ${table} network:`, e);
+            return null;
+        }
     },
     // ── Delete by primary key
-    delete(table, pkCol, pkVal) {
-        return __awaiter(this, void 0, void 0, function* () {
-            try {
-                const r = yield fetch(`${SUPA_URL}/rest/v1/${table}?${pkCol}=eq.${pkVal}`, {
-                    method: "DELETE", headers: this.headers,
-                });
-                if (!r.ok) {
-                    console.error(`delete ${table}:`, yield r.text());
-                    return false;
-                }
-                return true;
-            }
-            catch (e) {
-                console.error(`delete ${table} network:`, e);
+    async delete(table, pkCol, pkVal) {
+        try {
+            const r = await fetch(`${SUPA_URL}/rest/v1/${table}?${pkCol}=eq.${pkVal}`, {
+                method: "DELETE", headers: this.headers,
+            });
+            if (!r.ok) {
+                console.error(`delete ${table}:`, await r.text());
                 return false;
             }
-        });
+            return true;
+        }
+        catch (e) {
+            console.error(`delete ${table} network:`, e);
+            return false;
+        }
     },
 };
 // DB row → app shape converters (snake_case ↔ camelCase for visits/receipts)
@@ -553,7 +548,12 @@ const toDbVisit = (v) => ({
 });
 const fromDbReceipt = (r) => r ? ({
     id: r.id, hn: r.hn, visitId: r.visit_id, patname: r.patname, date: r.date,
-    items: Array.isArray(r.items) ? r.items : (r.items ? JSON.parse(r.items) : []),
+    items: Array.isArray(r.items) ? r.items : (() => { try {
+        return r.items ? JSON.parse(r.items) : [];
+    }
+    catch (_) {
+        return [];
+    } })(),
     discount: r.discount || 0, paid: r.paid || 'เงินสด', status: r.status || 'รอชำระ',
 }) : null;
 const toDbReceipt = (r) => ({
@@ -796,10 +796,10 @@ function ClinicDashboard({ session, onLogout }) {
     // ── Load all data from Supabase on mount
     useEffect(() => {
         let cancelled = false;
-        const load = () => __awaiter(this, void 0, void 0, function* () {
+        const load = async () => {
             setLoading(true);
             try {
-                const [pts, vis, apps, recs, meds, svcs] = yield Promise.all([
+                const [pts, vis, apps, recs, meds, svcs] = await Promise.all([
                     supa.getAll('patients'),
                     supa.getAll('visits'),
                     supa.getAll('appointments'),
@@ -846,7 +846,7 @@ function ClinicDashboard({ session, onLogout }) {
                 if (!cancelled)
                     setLoading(false);
             }
-        });
+        };
         load();
         return () => { cancelled = true; };
     }, []);
@@ -854,29 +854,29 @@ function ClinicDashboard({ session, onLogout }) {
     useEffect(() => {
         if (!dbReady)
             return;
-        const seed = () => __awaiter(this, void 0, void 0, function* () {
-            const pts = yield supa.getAll('patients');
+        const seed = async () => {
+            const pts = await supa.getAll('patients');
             if (pts && pts.length === 0) {
-                yield supa.upsert('patients', SAMPLE_PATIENTS);
-                yield supa.upsert('medicines', SAMPLE_MEDICINES);
-                yield supa.upsert('treatment_services', SAMPLE_SERVICES);
+                await supa.upsert('patients', SAMPLE_PATIENTS);
+                await supa.upsert('medicines', SAMPLE_MEDICINES);
+                await supa.upsert('treatment_services', SAMPLE_SERVICES);
                 console.log('Sample data seeded to DB');
             }
-        });
+        };
         seed();
     }, [dbReady]);
     // ── CRUD helpers that update both state and DB
-    const savePatient = (p) => __awaiter(this, void 0, void 0, function* () {
+    const savePatient = async (p) => {
         const existed = patients.some(x => x.hn === p.hn);
         setPatients(prev => {
             const exists = prev.find(x => x.hn === p.hn);
             return exists ? prev.map(x => x.hn === p.hn ? p : x) : [...prev, p];
         });
-        yield supa.upsert('patients', p);
+        await supa.upsert('patients', p);
         addAuditEntry({ user: (session === null || session === void 0 ? void 0 : session.username) || (session === null || session === void 0 ? void 0 : session.name), action: existed ? 'edit' : 'create',
             module: 'เวชระเบียน', detail: `${existed ? 'แก้ไข' : 'เพิ่ม'}ข้อมูลผู้ป่วย HN ${p.hn} — ${p.name}` });
-    });
-    const saveVisit = (v) => __awaiter(this, void 0, void 0, function* () {
+    };
+    const saveVisit = async (v) => {
         // Check BEFORE setState — setState updater runs async so can't rely on closure var
         const existedInDb = visits.some(x => x.id === v.id);
         setVisits(prev => {
@@ -886,17 +886,17 @@ function ClinicDashboard({ session, onLogout }) {
         const dbRow = toDbVisit(v);
         let result;
         if (existedInDb) {
-            result = yield supa.patch('visits', 'id', v.id, dbRow);
+            result = await supa.patch('visits', 'id', v.id, dbRow);
             if (result === null) {
                 console.warn('saveVisit: PATCH failed, trying INSERT');
-                result = yield supa.insert('visits', dbRow);
+                result = await supa.insert('visits', dbRow);
             }
         }
         else {
-            result = yield supa.insert('visits', dbRow);
+            result = await supa.insert('visits', dbRow);
             if (result === null) {
                 console.warn('saveVisit: INSERT failed, trying PATCH');
-                result = yield supa.patch('visits', 'id', v.id, dbRow);
+                result = await supa.patch('visits', 'id', v.id, dbRow);
             }
         }
         if (result === 'RLS_ERROR') {
@@ -908,75 +908,75 @@ function ClinicDashboard({ session, onLogout }) {
             setSaveError(true);
         }
         return result;
-    });
-    const deleteVisit = (id) => __awaiter(this, void 0, void 0, function* () {
+    };
+    const deleteVisit = async (id) => {
         if (!window.confirm('⚠️ ยืนยันลบประวัติการตรวจนี้?\nการลบจะลบประวัติออกจากฐานข้อมูลถาวร ไม่สามารถกู้คืนได้'))
             return;
         setVisits(prev => prev.filter(v => v.id !== id));
-        yield supa.delete('visits', 'id', id);
+        await supa.delete('visits', 'id', id);
         addAuditEntry({ user: (session === null || session === void 0 ? void 0 : session.username) || (session === null || session === void 0 ? void 0 : session.name), action: 'delete', module: 'ตรวจรักษา', detail: `ลบประวัติการตรวจ ID ${id}` });
-    });
-    const saveReceipt = (r) => __awaiter(this, void 0, void 0, function* () {
+    };
+    const saveReceipt = async (r) => {
         setReceipts(prev => [...prev, r]);
-        yield supa.upsert('receipts', toDbReceipt(r));
+        await supa.upsert('receipts', toDbReceipt(r));
         addAuditEntry({ user: (session === null || session === void 0 ? void 0 : session.username) || (session === null || session === void 0 ? void 0 : session.name), action: 'create', module: 'ใบเสร็จ', detail: `สร้างใบเสร็จ ${r.id} ผู้ป่วย HN ${r.hn}` });
-    });
+    };
     // Update an existing receipt (e.g. confirm payment / change payment method)
-    const updateReceipt = (r) => __awaiter(this, void 0, void 0, function* () {
+    const updateReceipt = async (r) => {
         setReceipts(prev => prev.map(x => x.id === r.id ? r : x));
-        yield supa.upsert('receipts', toDbReceipt(r));
-    });
-    const deleteReceipt = (id) => __awaiter(this, void 0, void 0, function* () {
+        await supa.upsert('receipts', toDbReceipt(r));
+    };
+    const deleteReceipt = async (id) => {
         if (!window.confirm('ยืนยันลบใบเสร็จนี้?\nการลบใบเสร็จจะไม่กระทบต่อประวัติการรักษาของผู้ป่วย'))
             return;
         setReceipts(prev => prev.filter(x => x.id !== id));
-        yield supa.delete('receipts', 'id', id);
+        await supa.delete('receipts', 'id', id);
         addAuditEntry({ user: (session === null || session === void 0 ? void 0 : session.username) || (session === null || session === void 0 ? void 0 : session.name), action: 'delete', module: 'ใบเสร็จ', detail: `ลบใบเสร็จ ID ${id}` });
-    });
-    const saveAppointment = (a) => __awaiter(this, void 0, void 0, function* () {
+    };
+    const saveAppointment = async (a) => {
         const existed = appointments.some(x => x.id === a.id);
         setAppointments(prev => {
             const exists = prev.find(x => x.id === a.id);
             return exists ? prev.map(x => x.id === a.id ? a : x) : [...prev, a];
         });
-        yield supa.upsert('appointments', a);
+        await supa.upsert('appointments', a);
         addAuditEntry({ user: (session === null || session === void 0 ? void 0 : session.username) || (session === null || session === void 0 ? void 0 : session.name), action: existed ? 'edit' : 'create', module: 'นัดหมาย', detail: `${existed ? 'แก้ไข' : 'เพิ่ม'}นัดหมาย ${a.id} HN ${a.hn}` });
-    });
-    const deleteAppointment = (id) => __awaiter(this, void 0, void 0, function* () {
+    };
+    const deleteAppointment = async (id) => {
         setAppointments(prev => prev.filter(a => a.id !== id));
-        yield supa.delete('appointments', 'id', id);
+        await supa.delete('appointments', 'id', id);
         addAuditEntry({ user: (session === null || session === void 0 ? void 0 : session.username) || (session === null || session === void 0 ? void 0 : session.name), action: 'delete', module: 'นัดหมาย', detail: `ลบนัดหมาย ID ${id}` });
-    });
-    const saveMedicine = (m) => __awaiter(this, void 0, void 0, function* () {
+    };
+    const saveMedicine = async (m) => {
         const existed = medicines.some(x => x.id === m.id);
         setMedicines(prev => {
             const exists = prev.find(x => x.id === m.id);
             return exists ? prev.map(x => x.id === m.id ? m : x) : [...prev, m];
         });
-        yield supa.upsert('medicines', m);
+        await supa.upsert('medicines', m);
         addAuditEntry({ user: (session === null || session === void 0 ? void 0 : session.username) || (session === null || session === void 0 ? void 0 : session.name), action: existed ? 'edit' : 'create', module: 'คลังยา', detail: `${existed ? 'แก้ไข' : 'เพิ่ม'}ยา ${m.name}` });
-    });
-    const deleteMedicine = (id) => __awaiter(this, void 0, void 0, function* () {
+    };
+    const deleteMedicine = async (id) => {
         const m = medicines.find(x => x.id === id);
         setMedicines(prev => prev.filter(m => m.id !== id));
-        yield supa.delete('medicines', 'id', id);
+        await supa.delete('medicines', 'id', id);
         addAuditEntry({ user: (session === null || session === void 0 ? void 0 : session.username) || (session === null || session === void 0 ? void 0 : session.name), action: 'delete', module: 'คลังยา', detail: `ลบยา ${(m === null || m === void 0 ? void 0 : m.name) || id}` });
-    });
-    const patchMedicineStock = (medId, newStock) => __awaiter(this, void 0, void 0, function* () {
+    };
+    const patchMedicineStock = async (medId, newStock) => {
         setMedicines(prev => prev.map(m => m.id === medId ? Object.assign(Object.assign({}, m), { stock: newStock }) : m));
-        yield supa.patch('medicines', 'id', medId, { stock: newStock });
-    });
-    const saveTreatmentService = (s) => __awaiter(this, void 0, void 0, function* () {
+        await supa.patch('medicines', 'id', medId, { stock: newStock });
+    };
+    const saveTreatmentService = async (s) => {
         setTreatmentServices(prev => {
             const exists = prev.find(x => x.id === s.id);
             return exists ? prev.map(x => x.id === s.id ? s : x) : [...prev, s];
         });
-        yield supa.upsert('treatment_services', s);
-    });
-    const deleteTreatmentService = (id) => __awaiter(this, void 0, void 0, function* () {
+        await supa.upsert('treatment_services', s);
+    };
+    const deleteTreatmentService = async (id) => {
         setTreatmentServices(prev => prev.filter(s => s.id !== id));
-        yield supa.delete('treatment_services', 'id', id);
-    });
+        await supa.delete('treatment_services', 'id', id);
+    };
     // ── ID generators (based on current state length for uniqueness)
     const nextHN = () => pad(patients.length + 1);
     const nextVID = () => { const ts = Date.now(); return `V${ts}${Math.floor(Math.random() * 100)}`; };
@@ -1369,7 +1369,6 @@ function DashboardPage({ todayVisits, todayAppoints, lowStock, monthRevenue, pat
                 { icon: '👤', label: 'ผู้ป่วยทั้งหมด', value: patients.length + ' ราย', color: 'var(--primary)' },
                 { icon: '🩺', label: 'ตรวจวันนี้', value: todayVisits + ' ราย', color: 'var(--accent)' },
                 { icon: '📅', label: 'นัดวันนี้', value: todayAppoints + ' ราย', color: '#8e44ad' },
-                { icon: '💰', label: 'รายรับเดือนนี้', value: (monthRevenue).toLocaleString() + ' บ.', color: 'var(--warning)' },
                 { icon: '⚠️', label: 'ยาใกล้หมด', value: lowStock + ' รายการ', color: 'var(--danger)' },
             ].map((s, i) => (React.createElement("div", { key: i, className: "card", style: { textAlign: 'center', padding: '18px 10px' } },
                 React.createElement("div", { style: { fontSize: 28, marginBottom: 6 } }, s.icon),
@@ -1782,20 +1781,20 @@ function RegisterPage({ patients, savePatient, visits, saveVisit, deleteVisit, n
         return (p.fname || '').toLowerCase().includes(q) || (p.lname || '').toLowerCase().includes(q) ||
             (p.hn || '').includes(q) || (p.idcard || '').includes(q) || (p.tel || '').includes(q);
     });
-    const saveNewPatient = () => __awaiter(this, void 0, void 0, function* () {
+    const saveNewPatient = async () => {
         if (!form.fname.trim() || !form.lname.trim()) {
             alert('กรุณากรอกชื่อและนามสกุล');
             return;
         }
         const hn = nextHN();
         const newP = Object.assign(Object.assign({}, form), { hn, created_at: new Date().toISOString() });
-        yield savePatient(newP);
+        await savePatient(newP);
         const hasIntake = Object.values(intake).some(v => v && String(v).trim());
         let visitId = null;
         if (hasIntake && saveVisit && nextVID) {
             const vid = nextVID();
             visitId = vid;
-            yield saveVisit({
+            await saveVisit({
                 id: vid, hn, date: today(),
                 cc: intake.cc || '', pi: '', pe: '', dx: '', tx: '',
                 drugs: [], services: [],
@@ -1810,10 +1809,10 @@ function RegisterPage({ patients, savePatient, visits, saveVisit, deleteVisit, n
         setForm({ prefix: 'นาย', fname: '', lname: '', gender: 'ชาย', dob: '', idcard: '', tel: '', lineId: '', address: '', bloodtype: '', allergy: '', chronic: '', currentmed: '', email: '', occupation: '', emcontact: '', emtel: '' });
         setIntake({ cc: '', temp: '', bp_sys: '', bp_dia: '', pr: '', rr: '', o2: '', weight: '', height: '', nurse: '' });
         setSubpage('registered');
-    });
+    };
     const age = (dob) => { if (!dob)
         return '-'; return Math.floor((new Date() - new Date(dob)) / (365.25 * 24 * 60 * 60 * 1000)) + ' ปี'; };
-    const bmi = intake.weight && intake.height ? (intake.weight / (Math.pow((intake.height / 100), 2))).toFixed(1) : null;
+    const bmi = intake.weight && intake.height ? (intake.weight / ((intake.height / 100) ** 2)).toFixed(1) : null;
     const bmiLabel = bmi ? (bmi < 18.5 ? 'น้ำหนักน้อย' : bmi < 23 ? 'ปกติ' : bmi < 25 ? 'ท้วม' : bmi < 30 ? 'อ้วน' : 'อ้วนมาก') : '';
     return (React.createElement("div", null,
         React.createElement("div", { style: { display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 } },
@@ -2007,7 +2006,7 @@ function PatientDetail({ pat, visits, onBack, patients, savePatient, treatmentSe
     const fi = (k, v) => setIntake(prev => (Object.assign(Object.assign({}, prev), { [k]: v })));
     const age = (dob) => { if (!dob)
         return '-'; const d = new Date() - new Date(dob); return Math.floor(d / (365.25 * 24 * 60 * 60 * 1000)) + ' ปี'; };
-    const save = () => __awaiter(this, void 0, void 0, function* () { yield savePatient(form); setEditing(false); alert('บันทึกข้อมูลเรียบร้อย'); });
+    const save = async () => { await savePatient(form); setEditing(false); alert('บันทึกข้อมูลเรียบร้อย'); };
     // ── Visit pagination & inline edit
     const VISITS_PER_PAGE = 3;
     const [visitPage, setVisitPage] = useState(1);
@@ -2019,20 +2018,20 @@ function PatientDetail({ pat, visits, onBack, patients, savePatient, treatmentSe
     const pagedVisits = sortedVisits.slice((visitPage - 1) * VISITS_PER_PAGE, visitPage * VISITS_PER_PAGE);
     const startEditVisit = (v) => { setEditingVisit(v.id); setEditVform(Object.assign({}, v)); };
     const cancelEditVisit = () => { setEditingVisit(null); setEditVform(null); };
-    const saveEditVisit = () => __awaiter(this, void 0, void 0, function* () {
+    const saveEditVisit = async () => {
         if (!saveVisit) {
             alert('ไม่สามารถบันทึกได้');
             return;
         }
-        yield saveVisit(editVform);
+        await saveVisit(editVform);
         alert('✅ บันทึกการแก้ไขเรียบร้อย');
         setEditingVisit(null);
         setEditVform(null);
-    });
+    };
     // Count how many queues this patient already has today, to assign next sequence number
     const todayStr = today();
     const todaysVisitsForPat = (allVisits || visits).filter(v => v.hn === pat.hn && v.date === todayStr);
-    const createNewQueue = () => __awaiter(this, void 0, void 0, function* () {
+    const createNewQueue = async () => {
         if (!saveVisit || !nextVID) {
             alert('ไม่สามารถสร้างคิวใหม่ได้ในขณะนี้');
             return;
@@ -2047,12 +2046,12 @@ function PatientDetail({ pat, visits, onBack, patients, savePatient, treatmentSe
             o2: intake.o2 || '', weight: intake.weight || '', height: intake.height || '',
             nurse: intake.nurse || '', note: 'บันทึกโดยพยาบาลตอนลงทะเบียน (Visit ใหม่)',
         };
-        yield saveVisit(v);
+        await saveVisit(v);
         const qNum = String(todaysVisitsForPat.length + 1).padStart(3, '0') + '-' + pat.hn.slice(-3);
         setNewQueueResult({ qNum, cc: intake.cc, visitId: vid });
         setIntake({ cc: '', temp: '', bp_sys: '', bp_dia: '', pr: '', rr: '', o2: '', weight: '', height: '', nurse: '' });
-    });
-    const bmi = intake.weight && intake.height ? (intake.weight / (Math.pow((intake.height / 100), 2))).toFixed(1) : null;
+    };
+    const bmi = intake.weight && intake.height ? (intake.weight / ((intake.height / 100) ** 2)).toFixed(1) : null;
     return (React.createElement("div", null,
         React.createElement("div", { style: { display: 'flex', gap: 10, alignItems: 'center', marginBottom: 14, flexWrap: 'wrap' } },
             React.createElement("button", { className: "btn btn-gray btn-sm", onClick: onBack }, "\u2190 \u0E01\u0E25\u0E31\u0E1A"),
@@ -2169,13 +2168,13 @@ function PatientDetail({ pat, visits, onBack, patients, savePatient, treatmentSe
                                 React.createElement("button", { className: "btn btn-accent btn-sm no-print", onClick: saveEditVisit }, "\uD83D\uDCBE \u0E1A\u0E31\u0E19\u0E17\u0E36\u0E01"))
                             : React.createElement("button", { className: "btn btn-outline btn-sm no-print", onClick: () => startEditVisit(v) }, "\u270F\uFE0F \u0E41\u0E01\u0E49\u0E44\u0E02")),
                         React.createElement("button", { className: "btn btn-print btn-sm no-print", onClick: () => doPrint(`visit-card-${v.id}`, 'บันทึกการตรวจ Visit ' + v.id) }, "\uD83D\uDDA8\uFE0F \u0E1E\u0E34\u0E21\u0E1E\u0E4C"),
-                        deleteVisit && editingVisit !== v.id && (React.createElement("button", { className: "btn btn-sm no-print", style: { background: '#e74c3c', color: '#fff', border: 'none', minWidth: 54 }, title: "\u0E25\u0E1A\u0E1B\u0E23\u0E30\u0E27\u0E31\u0E15\u0E34\u0E01\u0E32\u0E23\u0E15\u0E23\u0E27\u0E08\u0E19\u0E35\u0E49", onClick: () => __awaiter(this, void 0, void 0, function* () {
+                        deleteVisit && editingVisit !== v.id && (React.createElement("button", { className: "btn btn-sm no-print", style: { background: '#e74c3c', color: '#fff', border: 'none', minWidth: 54 }, title: "\u0E25\u0E1A\u0E1B\u0E23\u0E30\u0E27\u0E31\u0E15\u0E34\u0E01\u0E32\u0E23\u0E15\u0E23\u0E27\u0E08\u0E19\u0E35\u0E49", onClick: async () => {
                                 if (!window.confirm(`⚠️ ลบประวัติการตรวจนี้?\n\nVisit ID: ${v.id}\nวันที่: ${thaiDate(v.date)}${v.cc ? '  CC: ' + v.cc : ''}\n\nไม่สามารถกู้คืนได้`))
                                     return;
-                                yield deleteVisit(v.id);
+                                await deleteVisit(v.id);
                                 if (visitPage > 1 && pagedVisits.length === 1)
                                     setVisitPage(p => Math.max(1, p - 1));
-                            }) }, "\uD83D\uDDD1\uFE0F \u0E25\u0E1A")))),
+                            } }, "\uD83D\uDDD1\uFE0F \u0E25\u0E1A")))),
                 editingVisit === v.id && editVform
                     ? React.createElement(VisitRecord, { v: editVform, setV: setEditVform, pat: pat, readOnly: false, treatmentServices: treatmentServices })
                     : React.createElement(VisitRecord, { v: v, pat: pat, readOnly: true, treatmentServices: treatmentServices })))),
@@ -2222,7 +2221,7 @@ function ExaminePage({ patients, visits, saveVisit, nextVID, getPatient, getVisi
         setVform(Object.assign(Object.assign({}, v), { drugs: v.drugs || [], services: v.services || [] }));
         setSaved(false);
     };
-    const loadPatient = (p) => __awaiter(this, void 0, void 0, function* () {
+    const loadPatient = async (p) => {
         setSearchResults([]);
         setPat(p);
         // Only load a pending (unfinished) queue visit — never overwrite a completed visit
@@ -2245,10 +2244,10 @@ function ExaminePage({ patients, visits, saveVisit, nextVID, getPatient, getVisi
             setVform(newV);
             // Save to DB immediately — this ensures the visit exists in the database
             // before the doctor starts filling in data.
-            yield saveVisit(newV);
+            await saveVisit(newV);
         }
         setSaved(false);
-    });
+    };
     // ── Today's queue using the status field (set at Registration)
     // Falls back to dx/pe heuristic for legacy visits created before status field existed
     const todayQueue = visits
@@ -2261,12 +2260,12 @@ function ExaminePage({ patients, visits, saveVisit, nextVID, getPatient, getVisi
         .sort((a, b) => (b.id || '').localeCompare(a.id || ''))
         .map(v => ({ visit: v, pat: getPatient(v.hn) }))
         .filter(q => q.pat);
-    const save = () => __awaiter(this, void 0, void 0, function* () {
+    const save = async () => {
         const completed = Object.assign(Object.assign({}, vform), { status: 'ตรวจเสร็จ' });
         setVform(completed);
         setSaved(true);
         setLastVisit(completed);
-        const result = yield saveVisit(completed);
+        const result = await saveVisit(completed);
         if (result === null) {
             console.error('save: DB write failed');
             // rlsError is set by saveVisit if it detected a permissions issue
@@ -2274,10 +2273,10 @@ function ExaminePage({ patients, visits, saveVisit, nextVID, getPatient, getVisi
         else {
             alert('✅ บันทึกการตรวจเรียบร้อย\nย้ายผู้ป่วยไปที่ "ตรวจเสร็จแล้ว" แล้ว');
         }
-    });
+    };
     // Issues receipt + deducts stock + marks visit as ตรวจเสร็จ.
     // Payment method + "ชำระแล้ว" are finalized later at the Receipt page counter.
-    const issueReceiptOnly = () => __awaiter(this, void 0, void 0, function* () {
+    const issueReceiptOnly = async () => {
         const drugItems = (vform.drugs || []).map(d => ({
             desc: d.name, qty: d.qty, unit: d.unit, price: d.price, type: 'drug', medId: d.medId
         }));
@@ -2294,19 +2293,19 @@ function ExaminePage({ patients, visits, saveVisit, nextVID, getPatient, getVisi
             items: allItems.length > 0 ? allItems : [{ desc: 'ค่าตรวจรักษา', qty: 1, unit: 'ครั้ง', price: 300, type: 'service' }],
             discount: 0, paid: '', status: 'รอชำระ',
         };
-        yield saveReceipt(r);
+        await saveReceipt(r);
         // Deduct stock for dispensed drugs
         if (vform.drugs && vform.drugs.length > 0) {
             for (const med of medicines) {
                 const ordered = vform.drugs.filter(d => d.medId === med.id);
                 if (ordered.length === 0)
                     continue;
-                yield patchMedicineStock(med.id, Math.max(0, med.stock - ordered.reduce((s, d) => s + Number(d.qty), 0)));
+                await patchMedicineStock(med.id, Math.max(0, med.stock - ordered.reduce((s, d) => s + Number(d.qty), 0)));
             }
         }
         // Mark visit done and save full record
         const completed = Object.assign(Object.assign({}, vform), { status: 'ตรวจเสร็จ' });
-        const vResult = yield saveVisit(completed);
+        const vResult = await saveVisit(completed);
         if (vResult === null) {
             console.error('issueReceiptOnly: visit status save failed');
             // rlsError modal shown by saveVisit if it is a permissions issue
@@ -2315,7 +2314,7 @@ function ExaminePage({ patients, visits, saveVisit, nextVID, getPatient, getVisi
         setSaved(true);
         setLastVisit(completed);
         alert(`✅ ออกใบเสร็จ ${r.id} แล้ว — สถานะ "รอชำระ"\nยอดรวม: ${r.items.reduce((s, i) => s + i.qty * i.price, 0).toLocaleString()} บาท\n\nกรุณาแจ้งผู้ป่วยไปชำระเงินที่หน้า "ใบเสร็จรับเงิน"`);
-    });
+    };
     const age = (dob) => { if (!dob)
         return '-'; return Math.floor((new Date() - new Date(dob)) / (365.25 * 24 * 60 * 60 * 1000)) + ' ปี'; };
     return (React.createElement("div", null,
@@ -2613,13 +2612,20 @@ function DrugAutocomplete({ medicines, onAdd, allergyList }) {
     const [q, setQ] = useState('');
     const [open, setOpen] = useState(false);
     const [pending, setPending] = useState(null); // med waiting for instruction confirm
+    const [templates, setTemplates] = useState(() => loadDrugTemplates());
     const ref = useRef(null);
+    // Reload templates from storage whenever the component is focused
+    const refreshTemplates = () => setTemplates(loadDrugTemplates());
     const isAllergic = (name) => {
         if (!allergyList || allergyList === '-')
             return false;
         return allergyList.toLowerCase().split(/[\s,;/]+/).filter(a => a.length > 2).some(a => name.toLowerCase().includes(a));
     };
-    const matches = q.trim().length > 0
+    // "." triggers template mode; any other text searches medicines
+    const showingTemplates = q.trim() === '.' || q.trim().startsWith('.');
+    const templateFilter = showingTemplates && q.trim().length > 1 ? q.trim().slice(1).toLowerCase() : '';
+    const filteredTemplates = templates.filter(t => !templateFilter || t.name.toLowerCase().includes(templateFilter));
+    const matches = (!showingTemplates && q.trim().length > 0)
         ? medicines.filter(m => m.name.toLowerCase().includes(q.toLowerCase())).slice(0, 12)
         : [];
     useEffect(() => {
@@ -2637,15 +2643,67 @@ function DrugAutocomplete({ medicines, onAdd, allergyList }) {
         onAdd(drug);
         setPending(null);
     };
+    // Apply a template: add all its medicines to the prescription
+    const applyTemplate = (tpl) => {
+        setQ('');
+        setOpen(false);
+        let addedCount = 0;
+        tpl.medicines.forEach(mi => {
+            const med = medicines.find(m => m.id === mi.medId);
+            if (!med)
+                return; // skip if medicine no longer in inventory
+            onAdd({
+                name: mi.name || med.name,
+                qty: mi.qty || 1,
+                unit: mi.unit || med.unit,
+                freq: mi.freq || '',
+                price: mi.price != null ? mi.price : med.price,
+                medId: med.id,
+                stock: med.stock,
+            });
+            addedCount++;
+        });
+        if (addedCount > 0) {
+            alert(`✅ ใช้ Template "${tpl.name}" — เพิ่มยา ${addedCount} รายการในรายการสั่งยาเรียบร้อย\n\nหมายเหตุ: สต๊อกจะถูกหักเมื่อออกใบเสร็จ`);
+        }
+        else {
+            alert(`⚠️ Template "${tpl.name}" ไม่พบยาในคลัง — กรุณาตรวจสอบรายการยาใน Template`);
+        }
+    };
     return (React.createElement(React.Fragment, null,
         React.createElement("div", { ref: ref, style: { background: '#f0faf8', border: '1.5px solid #a8d5c8', borderRadius: 8, padding: '10px 12px', marginBottom: 10 } },
             React.createElement("div", { style: { fontWeight: 700, fontSize: 12, color: '#1e8449', marginBottom: 8 } },
                 "\uD83D\uDC8A \u0E40\u0E1E\u0E34\u0E48\u0E21\u0E22\u0E32\u0E08\u0E32\u0E01\u0E04\u0E25\u0E31\u0E07\u0E22\u0E32",
-                React.createElement("span", { style: { fontWeight: 400, color: '#888', marginLeft: 8, fontSize: 11 } }, "\u0E40\u0E25\u0E37\u0E2D\u0E01\u0E22\u0E32 \u2192 \u0E23\u0E30\u0E1A\u0E38\u0E27\u0E34\u0E18\u0E35\u0E43\u0E0A\u0E49 \u2192 \u0E22\u0E37\u0E19\u0E22\u0E31\u0E19")),
+                React.createElement("span", { style: { fontWeight: 400, color: '#888', marginLeft: 8, fontSize: 11 } }, "\u0E40\u0E25\u0E37\u0E2D\u0E01\u0E22\u0E32 \u2192 \u0E23\u0E30\u0E1A\u0E38\u0E27\u0E34\u0E18\u0E35\u0E43\u0E0A\u0E49 \u2192 \u0E22\u0E37\u0E19\u0E22\u0E31\u0E19"),
+                React.createElement("span", { style: { fontWeight: 600, color: '#1a5276', marginLeft: 8, fontSize: 11, background: '#e8f0ff', borderRadius: 4, padding: '1px 6px' } }, "\uD83D\uDCA1 \u0E01\u0E14 \".\" \u0E40\u0E1E\u0E37\u0E48\u0E2D\u0E40\u0E25\u0E37\u0E2D\u0E01 Template \u0E22\u0E32")),
             React.createElement("div", { style: { position: 'relative' } },
-                React.createElement("input", { value: q, onChange: e => { setQ(e.target.value); setOpen(true); }, onFocus: () => setOpen(true), placeholder: "\uD83D\uDD0D \u0E1E\u0E34\u0E21\u0E1E\u0E4C\u0E0A\u0E37\u0E48\u0E2D\u0E22\u0E32: amoxy, augm, para, omep, lorat...", style: { fontSize: 13, width: '100%', paddingRight: 32 } }),
+                React.createElement("input", { value: q, onChange: e => { setQ(e.target.value); setOpen(true); if (e.target.value === '.')
+                        refreshTemplates(); }, onFocus: () => { setOpen(true); if (q === '.')
+                        refreshTemplates(); }, placeholder: '\uD83D\uDD0D \u0E0A\u0E37\u0E48\u0E2D\u0E22\u0E32: amoxy, para, omep... | \u0E01\u0E14 "." \u0E40\u0E1E\u0E37\u0E48\u0E2D\u0E40\u0E25\u0E37\u0E2D\u0E01 Template', style: { fontSize: 13, width: '100%', paddingRight: 32 } }),
                 q && React.createElement("button", { onClick: () => { setQ(''); setOpen(false); }, style: { position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: '#999', fontSize: 16, lineHeight: 1 } }, "\u00D7"),
-                open && matches.length > 0 && (React.createElement("div", { className: "drug-dropdown" }, matches.map(m => {
+                open && showingTemplates && (React.createElement("div", { className: "drug-dropdown" },
+                    React.createElement("div", { style: { padding: '7px 12px', background: '#1a5276', color: '#fff', fontSize: 11, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6 } },
+                        "\uD83D\uDCCB Template \u0E22\u0E32 ",
+                        templateFilter && `— ค้นหา: "${templateFilter}"`,
+                        React.createElement("span", { style: { marginLeft: 'auto', fontWeight: 400, opacity: 0.8 } }, "\u0E04\u0E25\u0E34\u0E01\u0E40\u0E1E\u0E37\u0E48\u0E2D\u0E43\u0E0A\u0E49")),
+                    filteredTemplates.length === 0 && (React.createElement("div", { style: { padding: '12px 12px', color: '#888', fontSize: 12, textAlign: 'center' } },
+                        "\u0E44\u0E21\u0E48\u0E1E\u0E1A Template",
+                        templateFilter ? ` "${templateFilter}"` : '',
+                        React.createElement("br", null),
+                        React.createElement("span", { style: { fontSize: 11 } }, "\u0E2A\u0E23\u0E49\u0E32\u0E07 Template \u0E44\u0E14\u0E49\u0E17\u0E35\u0E48 \u0E04\u0E25\u0E31\u0E07\u0E22\u0E32 \u2192 Template \u0E22\u0E32"))),
+                    filteredTemplates.map(tpl => (React.createElement("div", { key: tpl.id, className: "drug-item", onClick: () => applyTemplate(tpl), style: { flexDirection: 'column', alignItems: 'flex-start', gap: 3 } },
+                        React.createElement("div", { style: { display: 'flex', width: '100%', justifyContent: 'space-between', alignItems: 'center' } },
+                            React.createElement("b", { style: { fontSize: 13, color: '#1a5276' } },
+                                "\uD83D\uDCCB ",
+                                tpl.name),
+                            React.createElement("span", { style: { background: '#1a5276', color: '#fff', borderRadius: 10, padding: '1px 8px', fontSize: 10, fontWeight: 600 } },
+                                tpl.medicines.length,
+                                " \u0E23\u0E32\u0E22\u0E01\u0E32\u0E23")),
+                        React.createElement("div", { style: { fontSize: 11, color: '#666', width: '100%' } },
+                            tpl.medicines.slice(0, 3).map(m => m.name).join(', '),
+                            tpl.medicines.length > 3 ? '...' : ''),
+                        tpl.note && React.createElement("div", { style: { fontSize: 10, color: '#888' } }, tpl.note)))))),
+                open && !showingTemplates && matches.length > 0 && (React.createElement("div", { className: "drug-dropdown" }, matches.map(m => {
                     const isLow = m.stock <= m.minstock;
                     const allergic = isAllergic(m.name);
                     return (React.createElement("div", { key: m.id, className: `drug-item${allergic ? ' drug-allergy-row' : ''}`, onClick: () => selectMed(m) },
@@ -2663,7 +2721,7 @@ function DrugAutocomplete({ medicines, onAdd, allergyList }) {
                                 "\u0E04\u0E07\u0E40\u0E2B\u0E25\u0E37\u0E2D ",
                                 m.stock))));
                 }))),
-                open && q.trim().length > 0 && matches.length === 0 && (React.createElement("div", { className: "drug-dropdown" },
+                open && !showingTemplates && q.trim().length > 0 && matches.length === 0 && (React.createElement("div", { className: "drug-dropdown" },
                     React.createElement("div", { style: { padding: '10px 12px', color: '#888', fontSize: 12 } },
                         "\u0E44\u0E21\u0E48\u0E1E\u0E1A\u0E22\u0E32\u0E43\u0E19\u0E04\u0E25\u0E31\u0E07 \"",
                         q,
@@ -3472,14 +3530,14 @@ function ReceiptPaymentPanel({ r, pat, updateReceipt, deleteReceipt, onDeleted, 
     const isPending = r.status !== 'ชำระแล้ว';
     const total = items.reduce((s, it) => s + it.qty * it.price, 0) - Number(discount);
     const updItem = (i, k, v) => setItems(prev => prev.map((it, idx) => idx === i ? Object.assign(Object.assign({}, it), { [k]: k === 'qty' || k === 'price' ? Number(v) : v }) : it));
-    const confirmPayment = () => __awaiter(this, void 0, void 0, function* () {
+    const confirmPayment = async () => {
         if (!window.confirm(`ยืนยันรับชำระเงิน ${total.toLocaleString()} บาท\nวิธีชำระ: ${paid}\n\nกดยืนยันเพื่อปิดบิล`))
             return;
         const updated = Object.assign(Object.assign({}, r), { items, discount: Number(discount), paid, status: 'ชำระแล้ว' });
-        yield updateReceipt(updated);
+        await updateReceipt(updated);
         onUpdated(updated);
         alert('✅ รับชำระเงินเรียบร้อย — ปิดบิลแล้ว');
-    });
+    };
     const docId = `receipt-doc-${r.id}`;
     return (React.createElement("div", null,
         isPending && (React.createElement("div", { className: "card no-print", style: { marginBottom: 14, background: '#fff8e1', border: '2px solid #f39c12' } },
@@ -3706,21 +3764,21 @@ function ReceiptQuickModal({ data, onClose, getPatient, nextRID, receipts, saveR
     // NOTE: payment method & "paid" confirmation now happen ONLY on the Receipt page
     // at the front counter. This modal just issues the receipt record (pending payment)
     // and deducts drug stock since the medication has physically been dispensed.
-    const save = () => __awaiter(this, void 0, void 0, function* () {
+    const save = async () => {
         const r = { id: nextRID(), hn: pat.hn, visitId: (visit === null || visit === void 0 ? void 0 : visit.id) || '', patname: pat.prefix + pat.fname + ' ' + pat.lname, date: today(), items, discount: Number(discount), paid: '', status: 'รอชำระ' };
-        yield saveReceipt(r);
+        await saveReceipt(r);
         for (const it of items) {
             if (it.type === 'drug') {
                 const med = it.medId
                     ? medicines.find(m => m.id === it.medId)
                     : medicines.find(m => it.desc.includes(m.name));
                 if (med)
-                    yield patchMedicineStock(med.id, Math.max(0, med.stock - it.qty));
+                    await patchMedicineStock(med.id, Math.max(0, med.stock - it.qty));
             }
         }
         alert(`ออกใบเสร็จ ${r.id} เรียบร้อย — สถานะ "รอชำระ"\n\nผู้ป่วยกรุณาไปชำระเงินที่เคาน์เตอร์ใบเสร็จ`);
         onClose();
-    });
+    };
     const drugTotal = items.filter(i => i.type === 'drug').reduce((s, i) => s + i.qty * i.price, 0);
     const svcTotal = items.filter(i => i.type !== 'drug').reduce((s, i) => s + i.qty * i.price, 0);
     return (React.createElement(Modal, { title: "\uD83E\uDDFE \u0E2D\u0E2D\u0E01\u0E43\u0E1A\u0E40\u0E2A\u0E23\u0E47\u0E08 (\u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E0A\u0E33\u0E23\u0E30)", onClose: onClose, width: 720 },
@@ -3810,14 +3868,14 @@ function AppointPage({ appointments, saveAppointment, deleteAppointment, patient
     }).sort((a, b) => a.date.localeCompare(b.date) || a.time.localeCompare(b.time));
     const todayCount = appointments.filter(a => a.date === today).length;
     const upCount = appointments.filter(a => a.date > today).length;
-    const save = (f) => __awaiter(this, void 0, void 0, function* () {
+    const save = async (f) => {
         const appt = f.id ? f : Object.assign(Object.assign({}, f), { id: nextAID() });
-        yield saveAppointment(appt);
+        await saveAppointment(appt);
         setEdit(null);
         setNewForm(null);
-    });
-    const del = (id) => __awaiter(this, void 0, void 0, function* () { if (window.confirm('ยืนยันลบการนัดหมายนี้?'))
-        yield deleteAppointment(id); });
+    };
+    const del = async (id) => { if (window.confirm('ยืนยันลบการนัดหมายนี้?'))
+        await deleteAppointment(id); };
     // Print a single appointment slip
     const printAppointSlip = (a) => {
         const pat = getPatient(a.hn);
@@ -3960,7 +4018,7 @@ function AppointQuickModal({ data, onClose, getPatient, appointments, saveAppoin
     const [form, setForm] = useState({ hn: pat.hn, patname: pat.prefix + pat.fname + ' ' + pat.lname, date: '', time: '09:00', reason: '', status: 'นัดแล้ว', note: '' });
     const f = (k, v) => setForm(prev => (Object.assign(Object.assign({}, prev), { [k]: v })));
     const slipId = 'appoint-slip-' + pat.hn;
-    const save = () => __awaiter(this, void 0, void 0, function* () { yield saveAppointment(Object.assign(Object.assign({}, form), { id: nextAID() })); alert('บันทึกการนัดหมายเรียบร้อย'); onClose(); });
+    const save = async () => { await saveAppointment(Object.assign(Object.assign({}, form), { id: nextAID() })); alert('บันทึกการนัดหมายเรียบร้อย'); onClose(); };
     return (React.createElement(Modal, { title: "\uD83D\uDCC5 \u0E1A\u0E31\u0E19\u0E17\u0E36\u0E01\u0E01\u0E32\u0E23\u0E19\u0E31\u0E14\u0E2B\u0E21\u0E32\u0E22", onClose: onClose, width: 540 },
         React.createElement("div", { style: { background: 'var(--primary-pale)', borderRadius: 6, padding: '8px 12px', marginBottom: 12, fontSize: 13 } },
             React.createElement("b", null,
@@ -4045,7 +4103,7 @@ function AccountingPage({ receipts, today }) {
     };
     const [r0, r1] = getRange();
     const inRange = (d) => d >= r0 && d <= r1;
-    const filtIncome = receipts.filter(r => inRange(r.date));
+    const filtIncome = receipts.filter(r => inRange(r.date) && r.status === 'ชำระแล้ว');
     const filtExp = expenses.filter(e => inRange(e.date));
     const totalIncome = filtIncome.reduce((s, r) => s + r.items.reduce((t, i) => t + i.qty * i.price, 0) - r.discount, 0);
     const totalExpense = filtExp.reduce((s, e) => s + e.amount, 0);
@@ -4208,19 +4266,48 @@ function PharmacyPage({ medicines, saveMedicine, deleteMedicine, receipts, treat
     const [svcEdit, setSvcEdit] = useState(null);
     const [svcAdding, setSvcAdding] = useState(false);
     const SVC_CATS = ['ค่าตรวจ', 'ค่าหัตถการ', 'ค่าตรวจพิเศษ', 'เอกสาร', 'อื่นๆ'];
-    const saveService = (f) => __awaiter(this, void 0, void 0, function* () {
+    // Drug template state
+    const [templates, setTemplates] = useState(() => loadDrugTemplates());
+    const [tplEdit, setTplEdit] = useState(null);
+    const [tplAdding, setTplAdding] = useState(false);
+    const refreshTemplates = () => setTemplates(loadDrugTemplates());
+    const saveTemplate = (tpl) => {
+        const all = loadDrugTemplates();
+        if (tpl.id) {
+            const idx = all.findIndex(t => t.id === tpl.id);
+            if (idx >= 0)
+                all[idx] = tpl;
+            else
+                all.push(tpl);
+        }
+        else {
+            all.push(Object.assign(Object.assign({}, tpl), { id: 'TPL' + Date.now() }));
+        }
+        saveDrugTemplates(all);
+        refreshTemplates();
+        setTplEdit(null);
+        setTplAdding(false);
+    };
+    const deleteTemplate = (id) => {
+        if (!window.confirm('ยืนยันลบ Template นี้?'))
+            return;
+        const all = loadDrugTemplates().filter(t => t.id !== id);
+        saveDrugTemplates(all);
+        refreshTemplates();
+    };
+    const saveService = async (f) => {
         const svc = f.id ? f : Object.assign(Object.assign({}, f), { id: 'S' + pad((treatmentServices || []).length + 1, 3), active: true });
-        yield saveTreatmentService(svc);
+        await saveTreatmentService(svc);
         setSvcEdit(null);
         setSvcAdding(false);
-    });
-    const delService = (id) => __awaiter(this, void 0, void 0, function* () { if (window.confirm('ยืนยันลบรายการหัตถการ?'))
-        yield deleteTreatmentService(id); });
-    const toggleActive = (id) => __awaiter(this, void 0, void 0, function* () {
+    };
+    const delService = async (id) => { if (window.confirm('ยืนยันลบรายการหัตถการ?'))
+        await deleteTreatmentService(id); };
+    const toggleActive = async (id) => {
         const svc = (treatmentServices || []).find(s => s.id === id);
         if (svc)
-            yield saveTreatmentService(Object.assign(Object.assign({}, svc), { active: !svc.active }));
-    });
+            await saveTreatmentService(Object.assign(Object.assign({}, svc), { active: !svc.active }));
+    };
     const cats = ['ทั้งหมด', ...new Set(medicines.map(m => m.category))];
     const filtered = medicines.filter(m => {
         const q = search.toLowerCase();
@@ -4230,14 +4317,14 @@ function PharmacyPage({ medicines, saveMedicine, deleteMedicine, receipts, treat
     });
     const lowStock = medicines.filter(m => m.stock <= m.minstock);
     const expireSoon = medicines.filter(m => (new Date(m.expire) - new Date()) / (1000 * 60 * 60 * 24) < 90);
-    const saveMed = (f) => __awaiter(this, void 0, void 0, function* () {
+    const saveMed = async (f) => {
         const med = f.id ? f : Object.assign(Object.assign({}, f), { id: 'M' + pad(medicines.length + 1, 3) });
-        yield saveMedicine(med);
+        await saveMedicine(med);
         setEdit(null);
         setAdding(false);
-    });
-    const delMed = (id) => __awaiter(this, void 0, void 0, function* () { if (window.confirm('ยืนยันลบ?'))
-        yield deleteMedicine(id); });
+    };
+    const delMed = async (id) => { if (window.confirm('ยืนยันลบ?'))
+        await deleteMedicine(id); };
     // Consumption report — date range filter state
     const [rptPeriod, setRptPeriod] = useState('today');
     const [rptYear, setRptYear] = useState(String(new Date().getFullYear()));
@@ -4275,9 +4362,11 @@ function PharmacyPage({ medicines, saveMedicine, deleteMedicine, receipts, treat
             React.createElement("div", { style: { marginLeft: 'auto', display: 'flex', gap: 8, flexWrap: 'wrap' } },
                 React.createElement("button", { className: `btn btn-sm ${tab === 'stock' ? 'btn-primary' : 'btn-outline'}`, onClick: () => setTab('stock') }, "\uD83D\uDCE6 \u0E2A\u0E15\u0E4A\u0E2D\u0E01\u0E22\u0E32"),
                 React.createElement("button", { onClick: () => setTab('services'), style: { padding: '5px 12px', fontSize: 12, fontWeight: 600, border: 'none', borderRadius: 6, cursor: 'pointer', fontFamily: 'inherit', background: tab === 'services' ? '#1e8449' : 'transparent', color: tab === 'services' ? '#fff' : '#1e8449', boxShadow: tab === 'services' ? 'none' : 'inset 0 0 0 1.5px #1e8449' } }, "\uD83C\uDFE5 \u0E23\u0E32\u0E22\u0E01\u0E32\u0E23\u0E2B\u0E31\u0E15\u0E16\u0E01\u0E32\u0E23"),
+                React.createElement("button", { onClick: () => { setTab('templates'); refreshTemplates(); }, style: { padding: '5px 12px', fontSize: 12, fontWeight: 600, border: 'none', borderRadius: 6, cursor: 'pointer', fontFamily: 'inherit', background: tab === 'templates' ? '#6c3483' : 'transparent', color: tab === 'templates' ? '#fff' : '#6c3483', boxShadow: tab === 'templates' ? 'none' : 'inset 0 0 0 1.5px #6c3483' } }, "\uD83D\uDCCB Template \u0E22\u0E32"),
                 React.createElement("button", { className: `btn btn-sm ${tab === 'report' ? 'btn-primary' : 'btn-outline'}`, onClick: () => setTab('report') }, "\uD83D\uDCCA \u0E23\u0E32\u0E22\u0E07\u0E32\u0E19"),
                 tab === 'stock' && React.createElement("button", { className: "btn btn-accent btn-sm", onClick: () => setAdding(true) }, "+ \u0E40\u0E1E\u0E34\u0E48\u0E21\u0E23\u0E32\u0E22\u0E01\u0E32\u0E23\u0E22\u0E32"),
-                tab === 'services' && React.createElement("button", { onClick: () => setSvcAdding(true), style: { padding: '5px 12px', fontSize: 12, fontWeight: 700, border: 'none', borderRadius: 6, cursor: 'pointer', fontFamily: 'inherit', background: '#1e8449', color: '#fff' } }, "+ \u0E40\u0E1E\u0E34\u0E48\u0E21\u0E23\u0E32\u0E22\u0E01\u0E32\u0E23\u0E2B\u0E31\u0E15\u0E16\u0E01\u0E32\u0E23"))),
+                tab === 'services' && React.createElement("button", { onClick: () => setSvcAdding(true), style: { padding: '5px 12px', fontSize: 12, fontWeight: 700, border: 'none', borderRadius: 6, cursor: 'pointer', fontFamily: 'inherit', background: '#1e8449', color: '#fff' } }, "+ \u0E40\u0E1E\u0E34\u0E48\u0E21\u0E23\u0E32\u0E22\u0E01\u0E32\u0E23\u0E2B\u0E31\u0E15\u0E16\u0E01\u0E32\u0E23"),
+                tab === 'templates' && React.createElement("button", { onClick: () => { setTplEdit(null); setTplAdding(true); }, style: { padding: '5px 12px', fontSize: 12, fontWeight: 700, border: 'none', borderRadius: 6, cursor: 'pointer', fontFamily: 'inherit', background: '#6c3483', color: '#fff' } }, "+ \u0E2A\u0E23\u0E49\u0E32\u0E07 Template \u0E43\u0E2B\u0E21\u0E48"))),
         (lowStock.length > 0 || expireSoon.length > 0) && (React.createElement("div", { className: "card", style: { marginBottom: 12, background: '#fff8f0', border: '1.5px solid var(--warning)' } },
             React.createElement("div", { style: { fontWeight: 700, color: 'var(--warning)', marginBottom: 8 } }, "\u26A0\uFE0F \u0E41\u0E08\u0E49\u0E07\u0E40\u0E15\u0E37\u0E2D\u0E19"),
             React.createElement("div", { style: { display: 'flex', flexWrap: 'wrap', gap: 6 } },
@@ -4436,7 +4525,144 @@ function PharmacyPage({ medicines, saveMedicine, deleteMedicine, receipts, treat
                             React.createElement("td", { style: { padding: '8px 14px' } }, "\u0E23\u0E27\u0E21"),
                             React.createElement("td", { style: { padding: '8px 14px', textAlign: 'center' } }, Object.values(consumed).reduce((s, c) => s + c.qty, 0)),
                             React.createElement("td", { style: { padding: '8px 14px', textAlign: 'right' } }, Object.values(consumed).reduce((s, c) => s + c.revenue, 0).toLocaleString()),
-                            React.createElement("td", null))))))))));
+                            React.createElement("td", null)))))))),
+        tab === 'templates' && (React.createElement("div", null,
+            React.createElement("div", { style: { background: '#f3e8ff', border: '1px solid #9b59b6', borderRadius: 8, padding: '10px 14px', marginBottom: 12, fontSize: 12, color: '#6c3483' } },
+                "\uD83D\uDCA1 ",
+                React.createElement("b", null, "Template \u0E22\u0E32"),
+                " \u0E04\u0E37\u0E2D\u0E0A\u0E38\u0E14\u0E04\u0E33\u0E2A\u0E31\u0E48\u0E07\u0E22\u0E32\u0E2A\u0E33\u0E40\u0E23\u0E47\u0E08\u0E23\u0E39\u0E1B\u0E2A\u0E33\u0E2B\u0E23\u0E31\u0E1A\u0E42\u0E23\u0E04\u0E17\u0E35\u0E48\u0E1E\u0E1A\u0E1A\u0E48\u0E2D\u0E22 \u0E0A\u0E48\u0E27\u0E22\u0E43\u0E2B\u0E49\u0E2A\u0E31\u0E48\u0E07\u0E22\u0E32\u0E44\u0E14\u0E49\u0E23\u0E27\u0E14\u0E40\u0E23\u0E47\u0E27",
+                React.createElement("br", null),
+                "\uD83D\uDCCC \u0E01\u0E32\u0E23\u0E2A\u0E23\u0E49\u0E32\u0E07 Template ",
+                React.createElement("b", null, "\u0E44\u0E21\u0E48\u0E2B\u0E31\u0E01\u0E2A\u0E15\u0E4A\u0E2D\u0E01"),
+                " \u2014 \u0E2A\u0E15\u0E4A\u0E2D\u0E01\u0E08\u0E30\u0E16\u0E39\u0E01\u0E2B\u0E31\u0E01\u0E40\u0E21\u0E37\u0E48\u0E2D\u0E2D\u0E2D\u0E01\u0E43\u0E1A\u0E40\u0E2A\u0E23\u0E47\u0E08\u0E08\u0E23\u0E34\u0E07\u0E40\u0E17\u0E48\u0E32\u0E19\u0E31\u0E49\u0E19",
+                React.createElement("br", null),
+                "\uD83D\uDD11 \u0E43\u0E19\u0E2B\u0E19\u0E49\u0E32\u0E15\u0E23\u0E27\u0E08\u0E23\u0E31\u0E01\u0E29\u0E32 \u0E1E\u0E34\u0E21\u0E1E\u0E4C ",
+                React.createElement("b", null, "\".\""),
+                " \u0E43\u0E19\u0E0A\u0E48\u0E2D\u0E07\u0E04\u0E49\u0E19\u0E2B\u0E32\u0E22\u0E32\u0E40\u0E1E\u0E37\u0E48\u0E2D\u0E40\u0E25\u0E37\u0E2D\u0E01 Template"),
+            (tplAdding || tplEdit) && (React.createElement(DrugTemplateForm, { form: tplEdit || { name: '', note: '', medicines: [] }, medicines: medicines, onSave: saveTemplate, onCancel: () => { setTplAdding(false); setTplEdit(null); } })),
+            templates.length === 0 && !tplAdding && !tplEdit && (React.createElement("div", { className: "card", style: { textAlign: 'center', padding: 30, color: 'var(--gray)' } },
+                React.createElement("div", { style: { fontSize: 40, marginBottom: 8 } }, "\uD83D\uDCCB"),
+                React.createElement("div", { style: { fontWeight: 600, fontSize: 14 } }, "\u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E21\u0E35 Template \u0E22\u0E32"),
+                React.createElement("div", { style: { fontSize: 13, marginTop: 4 } }, "\u0E01\u0E14\u0E1B\u0E38\u0E48\u0E21 \"+ \u0E2A\u0E23\u0E49\u0E32\u0E07 Template \u0E43\u0E2B\u0E21\u0E48\" \u0E40\u0E1E\u0E37\u0E48\u0E2D\u0E40\u0E1E\u0E34\u0E48\u0E21\u0E0A\u0E38\u0E14\u0E22\u0E32\u0E2A\u0E33\u0E40\u0E23\u0E47\u0E08\u0E23\u0E39\u0E1B"))),
+            templates.length > 0 && (React.createElement("div", { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(300px,1fr))', gap: 12 } }, templates.map(tpl => (React.createElement("div", { key: tpl.id, className: "card", style: { border: '1.5px solid #d7b6f7', padding: '14px 16px' } },
+                React.createElement("div", { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 } },
+                    React.createElement("div", null,
+                        React.createElement("div", { style: { fontWeight: 700, fontSize: 14, color: '#6c3483' } },
+                            "\uD83D\uDCCB ",
+                            tpl.name),
+                        tpl.note && React.createElement("div", { style: { fontSize: 11, color: 'var(--gray)', marginTop: 2 } }, tpl.note)),
+                    React.createElement("div", { style: { display: 'flex', gap: 4, flexShrink: 0 } },
+                        React.createElement("button", { className: "btn btn-outline btn-sm", style: { padding: '3px 10px', fontSize: 11, color: '#6c3483', borderColor: '#6c3483' }, onClick: () => { setTplAdding(false); setTplEdit(Object.assign({}, tpl)); } }, "\u270F\uFE0F \u0E41\u0E01\u0E49\u0E44\u0E02"),
+                        React.createElement("button", { className: "btn btn-danger btn-sm", style: { padding: '3px 10px', fontSize: 11 }, onClick: () => deleteTemplate(tpl.id) }, "\u0E25\u0E1A"))),
+                React.createElement("div", { style: { fontSize: 12, color: 'var(--gray-dark)', marginBottom: 6 } },
+                    "\u0E23\u0E32\u0E22\u0E01\u0E32\u0E23\u0E22\u0E32 (",
+                    tpl.medicines.length,
+                    " \u0E23\u0E32\u0E22\u0E01\u0E32\u0E23):"),
+                React.createElement("div", { style: { display: 'flex', flexDirection: 'column', gap: 5 } }, tpl.medicines.map((mi, i) => {
+                    const med = medicines.find(m => m.id === mi.medId);
+                    return (React.createElement("div", { key: i, style: { background: '#f8f0ff', borderRadius: 5, padding: '5px 9px', fontSize: 12 } },
+                        React.createElement("div", { style: { fontWeight: 600, color: '#1a5276' } }, mi.name),
+                        React.createElement("div", { style: { color: '#666', marginTop: 1 } },
+                            "\u0E08\u0E33\u0E19\u0E27\u0E19: ",
+                            mi.qty,
+                            " ",
+                            mi.unit,
+                            " | \u0E23\u0E32\u0E04\u0E32: ",
+                            mi.price,
+                            "\u0E3F/\u0E2B\u0E19\u0E48\u0E27\u0E22"),
+                        mi.freq && React.createElement("div", { style: { color: '#555', marginTop: 1, fontSize: 11 } }, mi.freq),
+                        !med && React.createElement("div", { style: { color: 'var(--danger)', fontSize: 10 } }, "\u26A0\uFE0F \u0E44\u0E21\u0E48\u0E1E\u0E1A\u0E22\u0E32\u0E43\u0E19\u0E04\u0E25\u0E31\u0E07")));
+                })))))))))));
+}
+// ===================== DRUG TEMPLATE FORM =====================
+function DrugTemplateForm({ form, medicines, onSave, onCancel }) {
+    const [f, setF] = useState({ name: form.name || '', note: form.note || '', medicines: [...(form.medicines || [])], id: form.id || '' });
+    const [medSearch, setMedSearch] = useState('');
+    const [medOpen, setMedOpen] = useState(false);
+    const medRef = useRef(null);
+    useEffect(() => {
+        const h = e => { if (medRef.current && !medRef.current.contains(e.target))
+            setMedOpen(false); };
+        document.addEventListener('mousedown', h);
+        return () => document.removeEventListener('mousedown', h);
+    }, []);
+    const medMatches = medSearch.trim().length > 0
+        ? medicines.filter(m => m.name.toLowerCase().includes(medSearch.toLowerCase())).slice(0, 10)
+        : [];
+    const addMed = (med) => {
+        if (f.medicines.find(m => m.medId === med.id)) {
+            alert('ยานี้มีอยู่ใน Template แล้ว');
+            return;
+        }
+        setF(prev => (Object.assign(Object.assign({}, prev), { medicines: [...prev.medicines, { medId: med.id, name: med.name, qty: 10, unit: med.unit, price: med.price, freq: '' }] })));
+        setMedSearch('');
+        setMedOpen(false);
+    };
+    const updMedItem = (i, k, v) => setF(prev => (Object.assign(Object.assign({}, prev), { medicines: prev.medicines.map((m, idx) => idx === i ? Object.assign(Object.assign({}, m), { [k]: k === 'qty' || k === 'price' ? Number(v) : v }) : m) })));
+    const rmMedItem = (i) => setF(prev => (Object.assign(Object.assign({}, prev), { medicines: prev.medicines.filter((_, idx) => idx !== i) })));
+    const doSave = () => {
+        if (!f.name.trim()) {
+            alert('กรุณาใส่ชื่อ Template');
+            return;
+        }
+        if (f.medicines.length === 0) {
+            alert('กรุณาเพิ่มยาอย่างน้อย 1 รายการ');
+            return;
+        }
+        onSave(Object.assign({}, f));
+    };
+    return (React.createElement("div", { className: "card", style: { marginBottom: 14, background: '#faf0ff', border: '2px solid #9b59b6' } },
+        React.createElement("div", { style: { fontWeight: 700, color: '#6c3483', marginBottom: 12, fontSize: 14 } }, f.id ? '✏️ แก้ไข Template' : '📋 สร้าง Template ยาใหม่'),
+        React.createElement("div", { style: { background: '#e8d5f7', borderRadius: 6, padding: '7px 12px', marginBottom: 10, fontSize: 11, color: '#6c3483' } }, "\u2139\uFE0F Template \u0E44\u0E21\u0E48\u0E2B\u0E31\u0E01\u0E2A\u0E15\u0E4A\u0E2D\u0E01 \u2014 \u0E2A\u0E15\u0E4A\u0E2D\u0E01\u0E08\u0E30\u0E16\u0E39\u0E01\u0E2B\u0E31\u0E01\u0E40\u0E21\u0E37\u0E48\u0E2D\u0E2D\u0E2D\u0E01\u0E43\u0E1A\u0E40\u0E2A\u0E23\u0E47\u0E08\u0E40\u0E17\u0E48\u0E32\u0E19\u0E31\u0E49\u0E19"),
+        React.createElement("div", { style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 } },
+            React.createElement("div", { style: { gridColumn: 'span 2' } },
+                React.createElement("label", null,
+                    "\u0E0A\u0E37\u0E48\u0E2D Template * ",
+                    React.createElement("span", { style: { fontWeight: 400, color: '#888', fontSize: 11 } }, "(\u0E40\u0E0A\u0E48\u0E19 \u0E2A\u0E39\u0E15\u0E23\u0E44\u0E02\u0E49\u0E2B\u0E27\u0E31\u0E14\u0E17\u0E31\u0E48\u0E27\u0E44\u0E1B, \u0E2A\u0E39\u0E15\u0E23 URTI)")),
+                React.createElement("input", { value: f.name, onChange: e => setF(p => (Object.assign(Object.assign({}, p), { name: e.target.value }))), placeholder: "\u0E0A\u0E37\u0E48\u0E2D Template" })),
+            React.createElement("div", { style: { gridColumn: 'span 2' } },
+                React.createElement("label", null, "\u0E2B\u0E21\u0E32\u0E22\u0E40\u0E2B\u0E15\u0E38 / \u0E04\u0E33\u0E2D\u0E18\u0E34\u0E1A\u0E32\u0E22"),
+                React.createElement("input", { value: f.note, onChange: e => setF(p => (Object.assign(Object.assign({}, p), { note: e.target.value }))), placeholder: "\u0E43\u0E0A\u0E49\u0E2A\u0E33\u0E2B\u0E23\u0E31\u0E1A..." }))),
+        React.createElement("div", { ref: medRef, style: { position: 'relative', marginBottom: 10 } },
+            React.createElement("label", { style: { color: '#6c3483', fontWeight: 700 } }, "+ \u0E40\u0E1E\u0E34\u0E48\u0E21\u0E22\u0E32\u0E40\u0E02\u0E49\u0E32 Template"),
+            React.createElement("input", { value: medSearch, onChange: e => { setMedSearch(e.target.value); setMedOpen(true); }, onFocus: () => setMedOpen(true), placeholder: "\uD83D\uDD0D \u0E1E\u0E34\u0E21\u0E1E\u0E4C\u0E0A\u0E37\u0E48\u0E2D\u0E22\u0E32...", style: { borderColor: '#9b59b6' } }),
+            medOpen && medMatches.length > 0 && (React.createElement("div", { style: { position: 'absolute', top: 'calc(100% + 2px)', left: 0, right: 0, background: '#fff', border: '1.5px solid #9b59b6', borderRadius: 6, zIndex: 600, boxShadow: '0 4px 18px rgba(0,0,0,0.13)', maxHeight: 200, overflowY: 'auto' } }, medMatches.map(m => (React.createElement("div", { key: m.id, onClick: () => addMed(m), style: { padding: '7px 12px', cursor: 'pointer', borderBottom: '1px solid #f0f0f0', display: 'flex', justifyContent: 'space-between', fontSize: 12 }, onMouseEnter: e => e.currentTarget.style.background = '#f3e8ff', onMouseLeave: e => e.currentTarget.style.background = '#fff' },
+                React.createElement("span", null,
+                    React.createElement("b", null, m.name),
+                    " ",
+                    React.createElement("span", { style: { color: '#888', fontSize: 11 } }, m.category)),
+                React.createElement("span", { style: { color: '#1e8449', fontWeight: 600 } },
+                    m.price,
+                    "\u0E3F/",
+                    m.unit,
+                    " | \u0E04\u0E07\u0E40\u0E2B\u0E25\u0E37\u0E2D ",
+                    m.stock))))))),
+        f.medicines.length > 0 && (React.createElement("div", { style: { border: '1.5px solid #d7b6f7', borderRadius: 6, overflow: 'hidden', marginBottom: 10 } },
+            React.createElement("table", { style: { width: '100%', borderCollapse: 'collapse', fontSize: 12 } },
+                React.createElement("thead", null,
+                    React.createElement("tr", { style: { background: '#6c3483', color: '#fff' } },
+                        React.createElement("th", { style: { padding: '6px 8px', textAlign: 'left' } }, "\u0E0A\u0E37\u0E48\u0E2D\u0E22\u0E32"),
+                        React.createElement("th", { style: { padding: '6px 8px', textAlign: 'center', width: 70 } }, "\u0E08\u0E33\u0E19\u0E27\u0E19"),
+                        React.createElement("th", { style: { padding: '6px 8px', textAlign: 'left', width: 55 } }, "\u0E2B\u0E19\u0E48\u0E27\u0E22"),
+                        React.createElement("th", { style: { padding: '6px 8px', textAlign: 'right', width: 80 } }, "\u0E23\u0E32\u0E04\u0E32/\u0E2B\u0E19\u0E48\u0E27\u0E22"),
+                        React.createElement("th", { style: { padding: '6px 8px', textAlign: 'left', minWidth: 180 } }, "\u0E27\u0E34\u0E18\u0E35\u0E43\u0E0A\u0E49\u0E22\u0E32"),
+                        React.createElement("th", { style: { width: 28 } }))),
+                React.createElement("tbody", null, f.medicines.map((mi, i) => (React.createElement("tr", { key: i, style: { background: i % 2 === 0 ? '#fff' : '#fdf0ff' } },
+                    React.createElement("td", { style: { padding: '5px 8px', fontWeight: 600, color: '#1a5276' } }, mi.name),
+                    React.createElement("td", { style: { padding: '5px 6px' } },
+                        React.createElement("input", { type: "number", value: mi.qty, min: 1, onChange: e => updMedItem(i, 'qty', e.target.value), style: { width: 55, textAlign: 'center', fontSize: 12, padding: '2px 4px' } })),
+                    React.createElement("td", { style: { padding: '5px 6px' } },
+                        React.createElement("input", { value: mi.unit, onChange: e => updMedItem(i, 'unit', e.target.value), style: { width: 50, fontSize: 12, padding: '2px 4px' } })),
+                    React.createElement("td", { style: { padding: '5px 6px' } },
+                        React.createElement("input", { type: "number", value: mi.price, min: 0, onChange: e => updMedItem(i, 'price', e.target.value), style: { width: 70, textAlign: 'right', fontSize: 12, padding: '2px 4px' } })),
+                    React.createElement("td", { style: { padding: '5px 6px' } },
+                        React.createElement(InstructionField, { value: mi.freq || '', onChange: val => updMedItem(i, 'freq', val) })),
+                    React.createElement("td", { style: { padding: '5px 4px', textAlign: 'center' } },
+                        React.createElement("button", { onClick: () => rmMedItem(i), style: { background: 'none', border: 'none', color: 'var(--danger)', cursor: 'pointer', fontSize: 14 } }, "\u2715"))))))))),
+        f.medicines.length === 0 && (React.createElement("div", { style: { textAlign: 'center', color: '#888', fontSize: 12, padding: '10px 0', marginBottom: 8 } }, "\u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E21\u0E35\u0E22\u0E32\u0E43\u0E19 Template \u2014 \u0E04\u0E49\u0E19\u0E2B\u0E32\u0E41\u0E25\u0E30\u0E40\u0E1E\u0E34\u0E48\u0E21\u0E22\u0E32\u0E14\u0E49\u0E32\u0E19\u0E1A\u0E19")),
+        React.createElement("div", { style: { textAlign: 'right', display: 'flex', gap: 8, justifyContent: 'flex-end' } },
+            React.createElement("button", { className: "btn btn-gray btn-sm", onClick: onCancel }, "\u0E22\u0E01\u0E40\u0E25\u0E34\u0E01"),
+            React.createElement("button", { onClick: doSave, style: { padding: '6px 18px', background: '#6c3483', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 700, fontSize: 13, fontFamily: 'inherit' } }, "\uD83D\uDCBE \u0E1A\u0E31\u0E19\u0E17\u0E36\u0E01 Template"))));
 }
 function MedForm({ form, onSave, onCancel, isNew }) {
     const [f, setF] = useState(Object.assign({}, form));
