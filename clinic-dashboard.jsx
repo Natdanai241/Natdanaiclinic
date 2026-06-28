@@ -3199,7 +3199,7 @@ function VisitRecord({v,setV,pat,readOnly,medicines,treatmentServices}) {
   const drugs=v.drugs||[];
   const services=v.services||[];
 
-  const addDrug=(d)=>f('drugs',[...drugs,{...d}]);
+  const addDrug=(d)=>setV&&setV(prev=>({...prev,drugs:[...(prev.drugs||[]),{...d}]}));
   const rmDrug=(i)=>f('drugs',drugs.filter((_,idx)=>idx!==i));
   const updDrug=(i,k,val)=>f('drugs',drugs.map((d,idx)=>idx===i?{...d,[k]:val}:d));
 

@@ -2904,7 +2904,7 @@ function VisitRecord({ v, setV, pat, readOnly, medicines, treatmentServices }) {
     const f = (k, val) => setV && setV(prev => (Object.assign(Object.assign({}, prev), { [k]: val })));
     const drugs = v.drugs || [];
     const services = v.services || [];
-    const addDrug = (d) => f('drugs', [...drugs, Object.assign({}, d)]);
+    const addDrug = (d) => setV && setV(prev => (Object.assign(Object.assign({}, prev), { drugs: [...(prev.drugs || []), Object.assign({}, d)] })));
     const rmDrug = (i) => f('drugs', drugs.filter((_, idx) => idx !== i));
     const updDrug = (i, k, val) => f('drugs', drugs.map((d, idx) => idx === i ? Object.assign(Object.assign({}, d), { [k]: val }) : d));
     return (React.createElement("div", null,
