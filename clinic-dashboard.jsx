@@ -5596,3 +5596,5 @@ function Modal({title,onClose,children,width=600}) {
   );
 }
 
+
+window.AppRoot = AppRoot;

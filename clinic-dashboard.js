@@ -4934,3 +4934,4 @@ function Modal({ title, onClose, children, width = 600 }) {
                 React.createElement("button", { onClick: onClose, style: { background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: 'var(--gray)', lineHeight: 1 } }, "\u00D7")),
             children)));
 }
+window.AppRoot = AppRoot;
