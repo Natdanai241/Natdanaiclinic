@@ -712,49 +712,6 @@ const doPrint = (elementId, title='') => {
 };
 
 // ── Print a single medication label in a small label-sized popup
-const printMedLabel = (item, patname, receiptId, receiptDate) => {
-  const name = item.desc || 'ยา';
-  const qty  = item.qty || 1;
-  const unit = item.unit || 'เม็ด';
-  const freq = item.freq || '';
-  const win  = window.open('', '_blank', 'width=380,height=340');
-  win.document.write(`<!DOCTYPE html><html><head><title>ฉลากยา</title>
-<style>
-  @import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap');
-  *{box-sizing:border-box;margin:0;padding:0;}
-  body{font-family:'Sarabun',sans-serif;padding:0;background:#fff;}
-  .label{
-    width:8.8cm; min-height:5cm;
-    border:2px solid #1a5276;
-    border-radius:6px;
-    padding:10px 14px;
-    page-break-inside:avoid;
-  }
-  .clinic{font-size:10px;color:#555;border-bottom:1px solid #ccc;padding-bottom:5px;margin-bottom:6px;}
-  .medname{font-size:16px;font-weight:700;color:#1a5276;margin-bottom:3px;}
-  .detail{font-size:12px;color:#222;margin-bottom:2px;}
-  .freq{font-size:13px;font-weight:600;color:#c0392b;margin:5px 0;}
-  .footer{font-size:10px;color:#888;border-top:1px dashed #ccc;margin-top:8px;padding-top:5px;display:flex;justify-content:space-between;}
-  @media print{body{margin:0;}}
-</style></head><body>
-<div class="label">
-  <div class="clinic">
-    <b>${CLINIC_NAME}</b><br>
-    ${CLINIC_ADDRESS} โทร. ${CLINIC_TEL}
-  </div>
-  <div class="medname">💊 ${name}</div>
-  <div class="detail">จำนวน: <b>${qty} ${unit}</b></div>
-  ${freq ? `<div class="freq">วิธีใช้: ${freq}</div>` : '<div class="freq" style="color:#888">วิธีใช้: —</div>'}
-  <div class="detail">ผู้ป่วย: <b>${patname || '—'}</b></div>
-  <div class="footer">
-    <span>ใบเสร็จ: ${receiptId || '—'}</span>
-    <span>วันที่จ่ายยา: ${receiptDate || '—'}</span>
-  </div>
-</div>
-<script>window.onload=()=>{window.print();}<\/script>
-</body></html>`);
-  win.document.close();
-};
 
 // ===================== INITIAL DATA =====================
 
@@ -3067,38 +3024,37 @@ function DrugAutocomplete({medicines,onAdd,allergyList}) {
 }
 
 // ===================== MED LABEL PRINT =====================
-function printMedLabel(drug,pat,visitDate) {
-  // width=320px ≈ 80mm at 96 dpi — only affects preview window, not print
-  const win=window.open('','_blank','width=320,height=360,menubar=no,toolbar=no,location=no,status=no');
+function printMedLabel(drug, pat, arg3, arg4) {
+  // Unified handler:
+  //  • 3-arg (ExaminePage):  (drugObj{name,qty,unit,freq}, patObj{prefix,fname,lname,hn}, visitDate)
+  //  • 4-arg (ReceiptPage):  (drugItem{desc,qty,unit,freq}, patNameStr, receiptId, dispensedDate)
+  const isReceiptMode = arg4 !== undefined;
+  const drugName = drug.name || drug.desc || 'ยา';
+  const qty      = drug.qty || 1;
+  const unit     = drug.unit || 'เม็ด';
+  const freq     = drug.freq || '';
+  const patName  = typeof pat === 'string'
+    ? (pat || '—')
+    : (pat ? (pat.prefix||'')+(pat.fname||'')+(pat.lname?' '+pat.lname:'') : '—');
+  const patHN    = (typeof pat === 'object' && pat) ? (pat.hn||null) : null;
+  const dispensedDate = isReceiptMode ? arg4 : arg3;
+  const receiptId     = isReceiptMode ? arg3 : null;
+  const win=window.open('','_blank','width=320,height=380,menubar=no,toolbar=no,location=no,status=no');
   win.document.write(`<!DOCTYPE html><html><head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=302,initial-scale=1.0"/>
   <title>ฉลากยา</title>
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap');
-
-    /* ─── PAPER: 80mm thermal label ─── */
-    @page {
-      size: 80mm auto;
-      margin: 0mm;
-    }
-
+    @page { size: 80mm auto; margin: 0mm; }
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
     html { width: 80mm; }
     body {
       font-family: 'Sarabun', 'TH Sarabun New', sans-serif;
-      font-size: 11px;
-      background: #fff;
-      width: 80mm;
-      max-width: 80mm;
-      margin: 0;
-      padding: 2mm 2mm 0;
-      overflow: hidden;
-      -webkit-print-color-adjust: exact;
-      print-color-adjust: exact;
+      font-size: 11px; background: #fff;
+      width: 80mm; max-width: 80mm; margin: 0; padding: 2mm 2mm 0;
+      overflow: hidden; -webkit-print-color-adjust: exact; print-color-adjust: exact;
     }
-
     .label   { border: 2px solid #1a5276; border-radius: 5px; padding: 7px 9px; width: 76mm; margin: 0 auto; }
     .header  { border-bottom: 1.5px solid #1a5276; padding-bottom: 4px; margin-bottom: 5px; text-align: center; }
     .clinic  { font-size: 10px; font-weight: 700; color: #1a5276; }
@@ -3107,22 +3063,10 @@ function printMedLabel(drug,pat,visitDate) {
     .freq    { font-size: 11px; color: #1a5276; font-weight: 600; background: #e8f5ff; border-radius: 4px; padding: 3px 6px; margin: 3px 0; }
     .row     { display: flex; justify-content: space-between; font-size: 10px; margin: 2px 0; }
     .footer  { border-top: 1px dashed #aaa; margin-top: 5px; padding-top: 4px; font-size: 9px; color: #555; }
-
     .print-wrap { text-align: center; margin-top: 8px; }
-
-    /* ─── PRINT OVERRIDES ─── */
     @media print {
-      @page {
-        size: 80mm auto;
-        margin: 0mm;
-      }
-      html, body {
-        width: 80mm !important;
-        max-width: 80mm !important;
-        margin: 0 !important;
-        padding: 1mm !important;
-        overflow: hidden !important;
-      }
+      @page { size: 80mm auto; margin: 0mm; }
+      html, body { width: 80mm !important; max-width: 80mm !important; margin: 0 !important; padding: 1mm !important; overflow: hidden !important; }
       .print-wrap { display: none !important; }
       .label { width: 78mm !important; margin: 0 !important; }
     }
@@ -3133,13 +3077,14 @@ function printMedLabel(drug,pat,visitDate) {
       <div class="clinic">${CLINIC_NAME}</div>
       <div class="addr">${CLINIC_ADDRESS} โทร.${CLINIC_TEL}</div>
     </div>
-    <div class="drug">💊 ${drug.name}</div>
-    <div class="row"><span>จำนวน:</span><span><b>${drug.qty} ${drug.unit}</b></span></div>
-    <div class="freq">📋 ${drug.freq||'-'}</div>
+    <div class="drug">💊 ${drugName}</div>
+    <div class="row"><span>จำนวน:</span><span><b>${qty} ${unit}</b></span></div>
+    <div class="freq">📋 ${freq||'-'}</div>
     <div style="height:3px;"></div>
-    <div class="row"><span>ผู้ป่วย:</span><span><b>${pat?pat.prefix+pat.fname+' '+pat.lname:'—'}</b></span></div>
-    <div class="row"><span>HN:</span><span>${pat?.hn||'—'}</span></div>
-    <div class="row"><span>วันที่จ่ายยา:</span><span>${thaiDate(visitDate||today())}</span></div>
+    <div class="row"><span>ผู้ป่วย:</span><span><b>${patName}</b></span></div>
+    ${patHN ? `<div class="row"><span>HN:</span><span>${patHN}</span></div>` : ''}
+    ${receiptId ? `<div class="row"><span>ใบเสร็จ:</span><span>${receiptId}</span></div>` : ''}
+    <div class="row"><span>วันที่จ่ายยา:</span><span>${thaiDate(dispensedDate||today())}</span></div>
     <div class="footer">
       <div>แพทย์ผู้สั่ง: ${DOCTOR_NAME} (${DOCTOR_LICENSE})</div>
       <div style="margin-top:2px;color:#c0392b;font-size:8px;">⚠️ โปรดอ่านวิธีใช้ให้ครบถ้วน หากมีอาการผิดปกติหยุดใช้และปรึกษาแพทย์</div>
