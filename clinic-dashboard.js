@@ -1825,6 +1825,262 @@ function printBlankMedRecord() {
     win.document.close();
     setTimeout(() => { win.focus(); win.print(); }, 600);
 }
+function printBlankReferral() {
+    const now = new Date();
+    const dateStr = `${now.getDate()}/${now.getMonth() + 1}/${now.getFullYear() + 543}`;
+    const win = window.open('', '_blank', 'width=850,height=1100');
+    win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"/><title>ใบส่งตัวผู้ป่วย</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700&display=swap');
+    *{box-sizing:border-box;margin:0;padding:0;}
+    html,body{height:100%;overflow:visible;}
+    body{font-family:'Sarabun',sans-serif;font-size:9.5pt;color:#111;padding:10px 14px;}
+    .header{display:flex;align-items:center;gap:10px;border-bottom:2.5px solid #1a5276;padding-bottom:6px;margin-bottom:6px;}
+    .header-text{flex:1;}
+    .clinic-name{font-size:13pt;font-weight:700;color:#1a5276;line-height:1.2;}
+    .clinic-sub{font-size:8pt;color:#555;margin-top:1px;}
+    .form-title{font-size:12pt;font-weight:700;text-align:center;margin:5px 0;background:#1a5276;color:#fff;padding:5px;border-radius:4px;letter-spacing:0.5px;}
+    .doc-number{display:flex;gap:16px;justify-content:flex-end;font-size:8pt;color:#555;margin-bottom:5px;}
+    .section{border:1px solid #b0c4d8;border-radius:4px;padding:5px 8px;margin-bottom:5px;}
+    .section.blue{background:#f0f5fb;}
+    .section.yellow{background:#fffdf0;border-color:#d4a017;}
+    .section.red{background:#fff5f5;border-color:#c0392b;}
+    .section-title{font-weight:700;font-size:8.5pt;color:#1a5276;margin-bottom:4px;border-bottom:1px solid #b0c4d8;padding-bottom:2px;}
+    .section.yellow .section-title{color:#7d5a00;border-color:#d4a017;}
+    .section.red .section-title{color:#c0392b;border-color:#c0392b;}
+    .row{display:flex;gap:8px;margin-bottom:4px;align-items:flex-end;}
+    .field{flex:1;}
+    .field-label{font-weight:600;font-size:7.5pt;color:#444;margin-bottom:1px;white-space:nowrap;}
+    .field-line{border-bottom:1px solid #777;min-height:14px;padding:0 2px;}
+    .blank-line{border-bottom:1px solid #bbb;min-height:13px;margin-bottom:3px;}
+    .lines-block{padding:2px 0;}
+    .two-col{display:grid;grid-template-columns:1fr 1fr;gap:5px;}
+    .allergy-box{background:#fff0f0;border:1.5px solid #c0392b;border-radius:3px;padding:3px 7px;margin-bottom:4px;}
+    .allergy-label{font-weight:700;color:#c0392b;font-size:8pt;}
+    .checkbox-row{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:8.5pt;align-items:center;margin:3px 0;}
+    .cb{display:inline-flex;align-items:center;gap:3px;}
+    .cb-box{width:11px;height:11px;border:1.5px solid #555;border-radius:2px;display:inline-block;flex-shrink:0;}
+    .urgency-row{display:flex;gap:12px;align-items:center;padding:4px 0;}
+    .urgency-tag{border:2px solid;border-radius:4px;padding:2px 10px;font-weight:700;font-size:8.5pt;cursor:default;}
+    .urgency-tag.red{border-color:#c0392b;color:#c0392b;}
+    .urgency-tag.orange{border-color:#e67e22;color:#e67e22;}
+    .urgency-tag.green{border-color:#27ae60;color:#27ae60;}
+    .sign-area{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:4px;}
+    .sign-box{text-align:center;}
+    .sign-line{border-bottom:1px solid #555;height:28px;margin-bottom:3px;}
+    .sign-label{font-size:7.5pt;color:#555;line-height:1.4;}
+    .reply-section{border:2px dashed #27ae60;border-radius:5px;padding:6px 10px;margin-top:6px;background:#f5fff8;}
+    .reply-title{font-weight:700;font-size:8.5pt;color:#27ae60;margin-bottom:4px;}
+    .footer{margin-top:5px;font-size:7pt;color:#999;text-align:center;border-top:1px dashed #ccc;padding-top:3px;}
+    @page{size:A4 portrait;margin:0;}
+    @media print{
+      *{-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+      body{padding:10px 14px;}
+      button{display:none!important;}
+      html,body{height:auto;overflow:visible;}
+    }
+  </style></head><body>
+  <div class="header">
+    <img src="${CLINIC_LOGO}" alt="logo" style="height:42px;flex-shrink:0;"/>
+    <div class="header-text">
+      <div class="clinic-name">${CLINIC_NAME}</div>
+      <div class="clinic-sub">${CLINIC_ADDRESS} | โทร. ${CLINIC_TEL}</div>
+      <div class="clinic-sub">แพทย์ผู้ส่งตัว: ${DOCTOR_NAME} | เลขที่ใบอนุญาต ${DOCTOR_LICENSE}</div>
+    </div>
+    <div style="text-align:right;font-size:8pt;color:#555;flex-shrink:0;min-width:120px;">
+      เลขที่หนังสือ: _______________<br/>
+      วันที่ส่งตัว: <b>${dateStr}</b><br/>
+      เวลา: __________ น.
+    </div>
+  </div>
+  <div class="form-title">📄 ใบส่งตัวผู้ป่วย / Referral Letter</div>
+  <div class="doc-number">
+    <span>ส่งถึง: ______________________________________________________</span>
+    <span>ประเภทสิทธิ์: <span style="border-bottom:1px solid #888;display:inline-block;width:100px;">&nbsp;</span></span>
+  </div>
+  <div class="section red" style="margin-bottom:5px;padding:4px 8px;">
+    <div class="section-title">⚡ ระดับความเร่งด่วน</div>
+    <div class="urgency-row">
+      <span class="urgency-tag red">🔴 ฉุกเฉินวิกฤต (Emergency)</span>
+      <span class="urgency-tag orange">🟠 เร่งด่วน (Urgent)</span>
+      <span class="urgency-tag green">🟢 ปกติ (Routine)</span>
+      <span style="font-size:8pt;margin-left:8px;">(วงกลมระดับที่เลือก)</span>
+    </div>
+  </div>
+  <div class="section blue">
+    <div class="section-title">👤 ข้อมูลผู้ป่วย</div>
+    <div class="row">
+      <div class="field" style="flex:0.4"><div class="field-label">HN</div><div class="field-line"></div></div>
+      <div class="field" style="flex:0.28"><div class="field-label">คำนำหน้า</div><div class="field-line"></div></div>
+      <div class="field" style="flex:1.2"><div class="field-label">ชื่อ</div><div class="field-line"></div></div>
+      <div class="field" style="flex:1.2"><div class="field-label">นามสกุล</div><div class="field-line"></div></div>
+      <div class="field" style="flex:0.35"><div class="field-label">เพศ</div><div class="field-line"></div></div>
+      <div class="field" style="flex:0.35"><div class="field-label">อายุ</div><div class="field-line"></div></div>
+      <div class="field" style="flex:0.3"><div class="field-label">หมู่เลือด</div><div class="field-line"></div></div>
+    </div>
+    <div class="row">
+      <div class="field" style="flex:1"><div class="field-label">เลขบัตรประชาชน / Passport</div><div class="field-line"></div></div>
+      <div class="field" style="flex:0.55"><div class="field-label">วัน/เดือน/ปีเกิด</div><div class="field-line"></div></div>
+      <div class="field" style="flex:0.45"><div class="field-label">น้ำหนัก (กก.)</div><div class="field-line"></div></div>
+      <div class="field" style="flex:0.45"><div class="field-label">ส่วนสูง (ซม.)</div><div class="field-line"></div></div>
+      <div class="field" style="flex:0.55"><div class="field-label">เบอร์โทร</div><div class="field-line"></div></div>
+      <div class="field" style="flex:0.9"><div class="field-label">ที่อยู่</div><div class="field-line"></div></div>
+    </div>
+    <div class="allergy-box">
+      <span class="allergy-label">⚠️ แพ้ยา/อาหาร/สารอื่น: </span>
+      <span style="font-size:8.5pt;">_____________________________________</span>
+      <span style="font-size:8pt;color:#c0392b;margin-left:8px;">ลักษณะอาการแพ้: _____________________________</span>
+    </div>
+    <div class="row" style="margin-bottom:0;">
+      <div class="field"><div class="field-label">โรคประจำตัว / ประวัติการแพทย์สำคัญ</div><div class="field-line"></div></div>
+      <div class="field"><div class="field-label">ยาที่ใช้ประจำ (Current Medications)</div><div class="field-line"></div></div>
+    </div>
+  </div>
+  <div class="two-col" style="margin-bottom:5px;">
+    <div class="section blue" style="margin-bottom:0;">
+      <div class="section-title">🔴 สัญญาณชีพ (Vital Signs)</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:3px 8px;">
+        <div><div class="field-label">BP (mmHg)</div><div class="field-line"></div></div>
+        <div><div class="field-label">PR (ครั้ง/นาที)</div><div class="field-line"></div></div>
+        <div><div class="field-label">Temp (°C)</div><div class="field-line"></div></div>
+        <div><div class="field-label">RR (/นาที)</div><div class="field-line"></div></div>
+        <div><div class="field-label">SpO₂ (%)</div><div class="field-line"></div></div>
+        <div><div class="field-label">GCS (E V M)</div><div class="field-line"></div></div>
+      </div>
+    </div>
+    <div class="section blue" style="margin-bottom:0;">
+      <div class="section-title">📋 อาการสำคัญ (Chief Complaint)</div>
+      <div class="lines-block">
+        <div class="blank-line"></div>
+        <div class="blank-line"></div>
+        <div class="blank-line" style="margin-bottom:0;"></div>
+      </div>
+      <div style="margin-top:4px;"><div class="field-label">ระยะเวลาที่เป็น</div><div class="field-line"></div></div>
+    </div>
+  </div>
+  <div class="section blue">
+    <div class="section-title">🩺 ประวัติและการตรวจร่างกาย</div>
+    <div class="two-col" style="margin-bottom:4px;">
+      <div>
+        <div class="field-label">PI. ประวัติการเจ็บป่วยปัจจุบัน</div>
+        <div class="lines-block">
+          <div class="blank-line"></div>
+          <div class="blank-line"></div>
+          <div class="blank-line" style="margin-bottom:0;"></div>
+        </div>
+      </div>
+      <div>
+        <div class="field-label">PE. ตรวจร่างกาย (Physical Examination)</div>
+        <div style="display:grid;grid-template-columns:auto 1fr;gap:2px 6px;align-items:baseline;">
+          <span style="font-size:8pt;font-weight:600;">General:</span><div class="field-line"></div>
+          <span style="font-size:8pt;font-weight:600;">HEENT:</span><div class="field-line"></div>
+          <span style="font-size:8pt;font-weight:600;">Lung/Heart:</span><div class="field-line"></div>
+          <span style="font-size:8pt;font-weight:600;">Abdomen:</span><div class="field-line"></div>
+          <span style="font-size:8pt;font-weight:600;">Others:</span><div class="field-line"></div>
+        </div>
+      </div>
+    </div>
+    <div>
+      <div class="field-label">Lab / Investigation ที่ส่งมาด้วย</div>
+      <div class="checkbox-row">
+        <span class="cb"><span class="cb-box"></span> CBC</span>
+        <span class="cb"><span class="cb-box"></span> BMP/Electrolyte</span>
+        <span class="cb"><span class="cb-box"></span> LFT</span>
+        <span class="cb"><span class="cb-box"></span> Renal function</span>
+        <span class="cb"><span class="cb-box"></span> Coagulogram</span>
+        <span class="cb"><span class="cb-box"></span> UA</span>
+        <span class="cb"><span class="cb-box"></span> ECG</span>
+        <span class="cb"><span class="cb-box"></span> X-Ray</span>
+        <span class="cb"><span class="cb-box"></span> CT/MRI</span>
+        <span class="cb"><span class="cb-box"></span> อื่น ๆ: <span style="border-bottom:1px solid #888;display:inline-block;width:80px;">&nbsp;</span></span>
+      </div>
+    </div>
+  </div>
+  <div class="section yellow">
+    <div class="section-title">🏷️ การวินิจฉัย (Diagnosis / Impression)</div>
+    <div class="row">
+      <div class="field"><div class="field-label">การวินิจฉัยเบื้องต้น (Provisional Dx)</div><div class="field-line"></div></div>
+      <div class="field" style="flex:0.5"><div class="field-label">รหัส ICD-10</div><div class="field-line"></div></div>
+    </div>
+    <div class="row" style="margin-bottom:0;">
+      <div class="field"><div class="field-label">การวินิจฉัยร่วม / Differential Dx</div><div class="field-line"></div></div>
+    </div>
+  </div>
+  <div class="section blue">
+    <div class="section-title">💊 การรักษาที่ให้ก่อนส่งตัว (Treatment Given)</div>
+    <div class="lines-block">
+      <div class="blank-line"></div>
+      <div class="blank-line"></div>
+      <div class="blank-line" style="margin-bottom:0;"></div>
+    </div>
+    <div class="row" style="margin-top:4px;margin-bottom:0;">
+      <div class="field"><div class="field-label">IV Line: <span style="border-bottom:1px solid #888;display:inline-block;width:120px;">&nbsp;</span></div></div>
+      <div class="field"><div class="field-label">O₂ therapy: <span style="border-bottom:1px solid #888;display:inline-block;width:100px;">&nbsp;</span></div></div>
+      <div class="field"><div class="field-label">Foley catheter: <span style="border-bottom:1px solid #888;display:inline-block;width:70px;">&nbsp;</span></div></div>
+    </div>
+  </div>
+  <div class="section yellow">
+    <div class="section-title">📌 เหตุผลในการส่งตัว (Reason for Referral)</div>
+    <div class="checkbox-row">
+      <span class="cb"><span class="cb-box"></span> เกินขีดความสามารถในการรักษา</span>
+      <span class="cb"><span class="cb-box"></span> ต้องการผู้เชี่ยวชาญเฉพาะทาง</span>
+      <span class="cb"><span class="cb-box"></span> ต้องการอุปกรณ์/เครื่องมือพิเศษ</span>
+      <span class="cb"><span class="cb-box"></span> ตามความประสงค์ผู้ป่วย</span>
+      <span class="cb"><span class="cb-box"></span> อื่น ๆ</span>
+    </div>
+    <div class="field-label" style="margin-top:4px;">รายละเอียดเพิ่มเติม / สิ่งที่ต้องการให้ดำเนินการ</div>
+    <div class="lines-block">
+      <div class="blank-line"></div>
+      <div class="blank-line" style="margin-bottom:0;"></div>
+    </div>
+  </div>
+  <div class="sign-area">
+    <div class="sign-box">
+      <div class="sign-line"></div>
+      <div class="sign-label">
+        ลายมือชื่อแพทย์ผู้ส่งตัว<br/>
+        (${DOCTOR_NAME})<br/>
+        เลขที่ใบอนุญาต ${DOCTOR_LICENSE}<br/>
+        วันที่ _______ เดือน _________________ พ.ศ. _______
+      </div>
+    </div>
+    <div class="sign-box">
+      <div class="sign-line"></div>
+      <div class="sign-label">
+        ลายมือชื่อผู้ป่วย / ผู้แทนโดยชอบธรรม<br/>
+        ความสัมพันธ์: __________________________<br/>
+        วันที่ _______ เดือน _________________ พ.ศ. _______
+      </div>
+    </div>
+  </div>
+  <div class="reply-section">
+    <div class="reply-title">✉️ ส่วนตอบกลับ (สำหรับสถานพยาบาลที่รับตัว)</div>
+    <div class="row">
+      <div class="field"><div class="field-label">สถานพยาบาลที่รับตัว</div><div class="field-line"></div></div>
+      <div class="field" style="flex:0.5"><div class="field-label">วันที่รับตัว</div><div class="field-line"></div></div>
+      <div class="field" style="flex:0.5"><div class="field-label">HN ที่รับ</div><div class="field-line"></div></div>
+    </div>
+    <div class="row">
+      <div class="field"><div class="field-label">การวินิจฉัยสุดท้าย (Final Diagnosis)</div><div class="field-line"></div></div>
+      <div class="field"><div class="field-label">ICD-10</div><div class="field-line"></div></div>
+    </div>
+    <div class="field-label">สรุปผลการรักษา / คำแนะนำส่งกลับ</div>
+    <div class="lines-block"><div class="blank-line"></div><div class="blank-line" style="margin-bottom:0;"></div></div>
+    <div style="text-align:right;margin-top:6px;">
+      <div style="display:inline-block;text-align:center;width:180px;">
+        <div class="sign-line"></div>
+        <div class="sign-label">ลายมือชื่อแพทย์ผู้รับตัว / วันที่</div>
+      </div>
+    </div>
+  </div>
+  <div class="footer">${CLINIC_NAME} | ${CLINIC_ADDRESS} | โทร. ${CLINIC_TEL} — ใบส่งตัวผู้ป่วย พิมพ์: ${dateStr}</div>
+  <div style="text-align:center;margin-top:8px;">
+    <button onclick="window.print()" style="padding:6px 20px;background:#1a5276;color:#fff;border:none;border-radius:5px;cursor:pointer;font-size:12px;font-family:'Sarabun',sans-serif;font-weight:700;">🖨️ พิมพ์ใบส่งตัว</button>
+  </div>
+  </body></html>`);
+    win.document.close();
+    setTimeout(() => { win.focus(); win.print(); }, 600);
+}
 // ===================== REGISTER / MEDICAL RECORD =====================
 function RegisterPage({ patients, savePatient, visits, saveVisit, deleteVisit, nextHN, nextVID, setPage, getVisitsForHN, getPatient, treatmentServices }) {
     const [subpage, setSubpage] = useState('list');
@@ -1881,6 +2137,7 @@ function RegisterPage({ patients, savePatient, visits, saveVisit, deleteVisit, n
             React.createElement("h2", { style: { fontWeight: 700, fontSize: 18, color: 'var(--primary)' } }, "\uD83D\uDCCB \u0E40\u0E27\u0E0A\u0E23\u0E30\u0E40\u0E1A\u0E35\u0E22\u0E19"),
             React.createElement("div", { style: { marginLeft: 'auto', display: 'flex', gap: 8 } },
                 React.createElement("button", { className: "btn btn-sm", style: { background: '#6c3483', color: '#fff' }, onClick: printBlankMedRecord }, "\uD83D\uDDA8\uFE0F \u0E1E\u0E34\u0E21\u0E1E\u0E4C\u0E1F\u0E2D\u0E23\u0E4C\u0E21\u0E40\u0E27\u0E0A\u0E23\u0E30\u0E40\u0E1A\u0E35\u0E22\u0E19"),
+                React.createElement("button", { className: "btn btn-sm", style: { background: '#117a65', color: '#fff' }, onClick: printBlankReferral }, "\uD83D\uDCC4 \u0E43\u0E1A\u0E2A\u0E48\u0E07\u0E15\u0E31\u0E27"),
                 React.createElement("button", { className: "btn btn-outline btn-sm", onClick: () => setSubpage('list'), style: { background: subpage === 'list' ? 'var(--primary-pale)' : '' } }, "\uD83D\uDCC2 \u0E23\u0E32\u0E22\u0E0A\u0E37\u0E48\u0E2D\u0E1C\u0E39\u0E49\u0E1B\u0E48\u0E27\u0E22"),
                 React.createElement("button", { className: "btn btn-primary btn-sm", onClick: () => { setSubpage('new'); setSelectedPat(null); setLastRegistered(null); } }, "+ \u0E25\u0E07\u0E17\u0E30\u0E40\u0E1A\u0E35\u0E22\u0E19\u0E43\u0E2B\u0E21\u0E48"))),
         subpage === 'list' && (React.createElement("div", null,
