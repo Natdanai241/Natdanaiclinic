@@ -585,27 +585,32 @@ const fromDbReceipt = (r) => {
     if (!r)
         return null;
     // Parse items — Supabase may return jsonb as already-parsed array or as a JSON string
+    let rawItems = r.items;
     let items = [];
-    if (Array.isArray(r.items)) {
-        items = r.items;
-    }
-    else if (r.items) {
+    if (typeof rawItems === 'string') {
         try {
-            items = JSON.parse(r.items);
+            rawItems = JSON.parse(rawItems);
         }
         catch (_) {
-            items = [];
+            rawItems = [];
         }
     }
-    // Ensure each item has numeric qty/price (DB may return strings)
-    items = items.map(it => (Object.assign(Object.assign({}, it), { qty: Number(it.qty) || 0, price: Number(it.price) || 0 })));
-    // If status column doesn't exist in DB, r.status === undefined/null.
-    // Treat missing status as 'ชำระแล้ว' (legacy receipts were all paid),
-    // but only 'รอชำระ' when explicitly set to that value.
+    if (Array.isArray(rawItems)) {
+        items = rawItems.map(it => {
+            // price/qty may be stored as string "300" or number 300 — force to number
+            const qty = parseFloat(String(it.qty).replace(/[^0-9.]/g, '')) || 0;
+            const price = parseFloat(String(it.price).replace(/[^0-9.]/g, '')) || 0;
+            return Object.assign(Object.assign({}, it), { qty, price });
+        });
+    }
+    // Debug: log first receipt to console so we can verify in browser
+    if (r.id)
+        console.log('[fromDbReceipt]', r.id, '→ items:', items.length, items[0] ? `first: qty=${items[0].qty} price=${items[0].price}` : 'EMPTY');
     const status = (r.status === 'รอชำระ') ? 'รอชำระ' : (r.status || 'ชำระแล้ว');
     return {
         id: r.id, hn: r.hn, visitId: r.visit_id, patname: r.patname, date: r.date,
-        items, discount: Number(r.discount) || 0, paid: r.paid || 'เงินสด', status,
+        items, discount: parseFloat(String(r.discount || 0).replace(/[^0-9.]/g, '')) || 0,
+        paid: r.paid || 'เงินสด', status,
     };
 };
 const toDbReceipt = (r) => ({
@@ -1047,7 +1052,7 @@ function ClinicDashboard({ session, onLogout }) {
     const lowStock = medicines.filter(m => m.stock <= m.minstock).length;
     const monthReceipts = receipts.filter(r => r.date && r.date.startsWith(todayStr.slice(0, 7)));
     const monthRevenue = monthReceipts.reduce((s, r) => {
-        const total = (r.items || []).reduce((t, i) => t + (Number(i.qty) || 0) * (Number(i.price) || 0), 0) - (Number(r.discount) || 0);
+        const total = (r.items || []).reduce((t, i) => t + (parseFloat(String(i.qty || 0)) || 0) * (parseFloat(String(i.price || 0)) || 0), 0) - (parseFloat(String(r.discount || 0)) || 0);
         return s + total;
     }, 0);
     const NAV_ALL = [
@@ -3644,7 +3649,7 @@ function ReceiptSummary({ receipts }) {
             return r.date.startsWith(year);
         return (!fromDate || r.date >= fromDate) && (!toDate || r.date <= toDate);
     });
-    const calcAmt = (r) => (r.items || []).reduce((t, i) => t + (Number(i.qty) || 0) * (Number(i.price) || 0), 0) - (Number(r.discount) || 0);
+    const calcAmt = (r) => (r.items || []).reduce((t, i) => t + (parseFloat(String(i.qty || 0)) || 0) * (parseFloat(String(i.price || 0)) || 0), 0) - (parseFloat(String(r.discount || 0)) || 0);
     const totalIncome = filtered.reduce((s, r) => s + calcAmt(r), 0);
     const paidTotal = filtered.filter(r => r.status === 'ชำระแล้ว').reduce((s, r) => s + calcAmt(r), 0);
     const pendingTotal = totalIncome - paidTotal;
@@ -4173,7 +4178,7 @@ function AccountingPage({ receipts, today }) {
     // Separate paid/pending for display — locally status is always correct even if DB lacks the column
     const filtIncome = receipts.filter(r => inRange(r.date));
     const filtExp = expenses.filter(e => inRange(e.date));
-    const calcAmt = (r) => (r.items || []).reduce((t, i) => t + (Number(i.qty) || 0) * (Number(i.price) || 0), 0) - (Number(r.discount) || 0);
+    const calcAmt = (r) => (r.items || []).reduce((t, i) => t + (parseFloat(String(i.qty || 0)) || 0) * (parseFloat(String(i.price || 0)) || 0), 0) - (parseFloat(String(r.discount || 0)) || 0);
     // totalIncome = ALL receipts in range (status-independent — works even if DB has no status column)
     const totalIncome = filtIncome.reduce((s, r) => s + calcAmt(r), 0);
     const paidIncome = filtIncome.filter(r => r.status === 'ชำระแล้ว').reduce((s, r) => s + calcAmt(r), 0);
