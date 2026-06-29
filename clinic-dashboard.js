@@ -767,6 +767,50 @@ const doPrint = (elementId, title = '') => {
     win.document.close();
     setTimeout(() => { win.focus(); win.print(); }, 600);
 };
+// ── Print a single medication label in a small label-sized popup
+const printMedLabel = (item, patname, receiptId, receiptDate) => {
+    const name = item.desc || 'ยา';
+    const qty = item.qty || 1;
+    const unit = item.unit || 'เม็ด';
+    const freq = item.freq || '';
+    const win = window.open('', '_blank', 'width=380,height=340');
+    win.document.write(`<!DOCTYPE html><html><head><title>ฉลากยา</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap');
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{font-family:'Sarabun',sans-serif;padding:0;background:#fff;}
+  .label{
+    width:8.8cm; min-height:5cm;
+    border:2px solid #1a5276;
+    border-radius:6px;
+    padding:10px 14px;
+    page-break-inside:avoid;
+  }
+  .clinic{font-size:10px;color:#555;border-bottom:1px solid #ccc;padding-bottom:5px;margin-bottom:6px;}
+  .medname{font-size:16px;font-weight:700;color:#1a5276;margin-bottom:3px;}
+  .detail{font-size:12px;color:#222;margin-bottom:2px;}
+  .freq{font-size:13px;font-weight:600;color:#c0392b;margin:5px 0;}
+  .footer{font-size:10px;color:#888;border-top:1px dashed #ccc;margin-top:8px;padding-top:5px;display:flex;justify-content:space-between;}
+  @media print{body{margin:0;}}
+</style></head><body>
+<div class="label">
+  <div class="clinic">
+    <b>${CLINIC_NAME}</b><br>
+    ${CLINIC_ADDRESS} โทร. ${CLINIC_TEL}
+  </div>
+  <div class="medname">💊 ${name}</div>
+  <div class="detail">จำนวน: <b>${qty} ${unit}</b></div>
+  ${freq ? `<div class="freq">วิธีใช้: ${freq}</div>` : '<div class="freq" style="color:#888">วิธีใช้: —</div>'}
+  <div class="detail">ผู้ป่วย: <b>${patname || '—'}</b></div>
+  <div class="footer">
+    <span>ใบเสร็จ: ${receiptId || '—'}</span>
+    <span>วันที่จ่ายยา: ${receiptDate || '—'}</span>
+  </div>
+</div>
+<script>window.onload=()=>{window.print();}<\/script>
+</body></html>`);
+    win.document.close();
+};
 // ===================== INITIAL DATA =====================
 const SAMPLE_PATIENTS = [
     { hn: '000001', prefix: 'นาย', fname: 'สมชาย', lname: 'ใจดี', gender: 'ชาย', dob: '1980-05-10', idcard: '3500100000001', tel: '0812345678', address: '123 ม.1 ต.เวียง อ.เชียงแสน จ.เชียงราย', bloodtype: 'O', allergy: 'Amoxicillin', chronic: 'เบาหวาน, ความดันโลหิตสูง', currentmed: 'Metformin 500mg, Amlodipine 5mg', createdAt: '2025-01-10' },
@@ -3613,7 +3657,8 @@ function ReceiptPaymentPanel({ r, pat, updateReceipt, deleteReceipt, onDeleted, 
                 React.createElement("tbody", null, items.map((it, i) => (React.createElement("tr", { key: i, style: { background: i % 2 === 0 ? '#fff' : '#fdf6e8' } },
                     React.createElement("td", { style: { padding: '5px 8px' } },
                         it.type === 'drug' ? '💊 ' : '🏥 ',
-                        it.desc),
+                        it.desc,
+                        it.type === 'drug' && React.createElement("button", { className: "btn no-print", onClick: () => printMedLabel(it, r.patname, r.id, r.date), style: { fontSize: 10, padding: '1px 7px', marginLeft: 6, background: '#2980b9', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer' } }, "\uD83C\uDFF7\uFE0F \u0E09\u0E25\u0E32\u0E01")),
                     React.createElement("td", { style: { padding: '5px 8px', textAlign: 'center' } },
                         React.createElement("input", { type: "number", value: it.qty, onChange: e => updItem(i, 'qty', e.target.value), style: { width: 50, textAlign: 'center', fontSize: 11, padding: '2px 4px' } })),
                     React.createElement("td", { style: { padding: '5px 8px', textAlign: 'right' } },
@@ -3770,13 +3815,17 @@ function ReceiptDoc({ r, pat, deleteReceipt, onDeleted }) {
                 drugItems.length > 0 && (React.createElement("tr", null,
                     React.createElement("td", { colSpan: 5, style: { padding: '5px 10px', background: '#f0f6ff', fontWeight: 700, fontSize: 11, color: '#1a5276' } }, "\uD83D\uDC8A \u0E23\u0E32\u0E22\u0E01\u0E32\u0E23\u0E22\u0E32"))),
                 drugItems.map((it, i) => (React.createElement("tr", { key: 'd' + i, style: { background: i % 2 === 0 ? '#f5faff' : '#eef5ff' } },
-                    React.createElement("td", { style: { padding: '6px 10px' } }, it.desc),
+                    React.createElement("td", { style: { padding: '6px 10px' } },
+                        it.desc,
+                        React.createElement("button", { className: "no-print", onClick: () => printMedLabel(it, (pat === null || pat === void 0 ? void 0 : pat.prefix) + ((pat === null || pat === void 0 ? void 0 : pat.fname) || r.patname || '') + ((pat === null || pat === void 0 ? void 0 : pat.lname) ? (' ' + pat.lname) : ''), r.id, r.date), style: { fontSize: 10, padding: '1px 7px', marginLeft: 7, background: '#2980b9', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer', verticalAlign: 'middle' } }, "\uD83C\uDFF7\uFE0F \u0E09\u0E25\u0E32\u0E01")),
                     React.createElement("td", { style: { padding: '6px 10px', textAlign: 'center' } }, it.qty),
                     React.createElement("td", { style: { padding: '6px 10px' } }, it.unit),
                     React.createElement("td", { style: { padding: '6px 10px', textAlign: 'right' } }, (it.price || 0).toLocaleString()),
                     React.createElement("td", { style: { padding: '6px 10px', textAlign: 'right', fontWeight: 600 } }, (it.qty * it.price).toLocaleString())))),
                 r.items.filter(i => !i.type).map((it, i) => (React.createElement("tr", { key: 'l' + i, style: { background: i % 2 === 0 ? '#fff' : 'var(--gray-pale)' } },
-                    React.createElement("td", { style: { padding: '6px 10px' } }, it.desc),
+                    React.createElement("td", { style: { padding: '6px 10px' } },
+                        it.desc,
+                        React.createElement("button", { className: "no-print", onClick: () => printMedLabel(it, (pat === null || pat === void 0 ? void 0 : pat.prefix) + ((pat === null || pat === void 0 ? void 0 : pat.fname) || r.patname || '') + ((pat === null || pat === void 0 ? void 0 : pat.lname) ? (' ' + pat.lname) : ''), r.id, r.date), style: { fontSize: 10, padding: '1px 7px', marginLeft: 7, background: '#7f8c8d', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer', verticalAlign: 'middle' } }, "\uD83C\uDFF7\uFE0F \u0E09\u0E25\u0E32\u0E01")),
                     React.createElement("td", { style: { padding: '6px 10px', textAlign: 'center' } }, it.qty),
                     React.createElement("td", { style: { padding: '6px 10px' } }, it.unit),
                     React.createElement("td", { style: { padding: '6px 10px', textAlign: 'right' } }, (it.price || 0).toLocaleString()),
@@ -3806,8 +3855,12 @@ function ReceiptDoc({ r, pat, deleteReceipt, onDeleted }) {
             CLINIC_ADDRESS,
             " \u2014 \u0E42\u0E17\u0E23. ",
             CLINIC_TEL),
-        React.createElement("div", { style: { textAlign: 'center', marginTop: 14, display: 'flex', gap: 8, justifyContent: 'center' }, className: "no-print" },
+        React.createElement("div", { style: { textAlign: 'center', marginTop: 14, display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap' }, className: "no-print" },
             React.createElement("button", { className: "btn btn-print btn-sm", onClick: () => doPrint(docId, 'ใบเสร็จรับเงิน เลขที่ ' + r.id) }, "\uD83D\uDDA8\uFE0F \u0E1E\u0E34\u0E21\u0E1E\u0E4C\u0E43\u0E1A\u0E40\u0E2A\u0E23\u0E47\u0E08"),
+            drugItems.length > 0 && (React.createElement("button", { className: "btn btn-sm", style: { background: '#2980b9', color: '#fff' }, onClick: () => drugItems.forEach(it => printMedLabel(it, (pat === null || pat === void 0 ? void 0 : pat.prefix) + ((pat === null || pat === void 0 ? void 0 : pat.fname) || r.patname || '') + ((pat === null || pat === void 0 ? void 0 : pat.lname) ? (' ' + pat.lname) : ''), r.id, r.date)) },
+                "\uD83C\uDFF7\uFE0F \u0E1E\u0E34\u0E21\u0E1E\u0E4C\u0E09\u0E25\u0E32\u0E01\u0E22\u0E32\u0E17\u0E31\u0E49\u0E07\u0E2B\u0E21\u0E14 (",
+                drugItems.length,
+                ")")),
             deleteReceipt && (React.createElement("button", { className: "btn btn-danger btn-sm", onClick: () => {
                     if (window.confirm(`ยืนยันลบใบเสร็จ ${r.id}?\nประวัติการรักษาจะไม่ถูกกระทบ`)) {
                         deleteReceipt(r.id);

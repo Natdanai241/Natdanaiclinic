@@ -711,6 +711,51 @@ const doPrint = (elementId, title='') => {
   setTimeout(()=>{win.focus();win.print();},600);
 };
 
+// ── Print a single medication label in a small label-sized popup
+const printMedLabel = (item, patname, receiptId, receiptDate) => {
+  const name = item.desc || 'ยา';
+  const qty  = item.qty || 1;
+  const unit = item.unit || 'เม็ด';
+  const freq = item.freq || '';
+  const win  = window.open('', '_blank', 'width=380,height=340');
+  win.document.write(`<!DOCTYPE html><html><head><title>ฉลากยา</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap');
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{font-family:'Sarabun',sans-serif;padding:0;background:#fff;}
+  .label{
+    width:8.8cm; min-height:5cm;
+    border:2px solid #1a5276;
+    border-radius:6px;
+    padding:10px 14px;
+    page-break-inside:avoid;
+  }
+  .clinic{font-size:10px;color:#555;border-bottom:1px solid #ccc;padding-bottom:5px;margin-bottom:6px;}
+  .medname{font-size:16px;font-weight:700;color:#1a5276;margin-bottom:3px;}
+  .detail{font-size:12px;color:#222;margin-bottom:2px;}
+  .freq{font-size:13px;font-weight:600;color:#c0392b;margin:5px 0;}
+  .footer{font-size:10px;color:#888;border-top:1px dashed #ccc;margin-top:8px;padding-top:5px;display:flex;justify-content:space-between;}
+  @media print{body{margin:0;}}
+</style></head><body>
+<div class="label">
+  <div class="clinic">
+    <b>${CLINIC_NAME}</b><br>
+    ${CLINIC_ADDRESS} โทร. ${CLINIC_TEL}
+  </div>
+  <div class="medname">💊 ${name}</div>
+  <div class="detail">จำนวน: <b>${qty} ${unit}</b></div>
+  ${freq ? `<div class="freq">วิธีใช้: ${freq}</div>` : '<div class="freq" style="color:#888">วิธีใช้: —</div>'}
+  <div class="detail">ผู้ป่วย: <b>${patname || '—'}</b></div>
+  <div class="footer">
+    <span>ใบเสร็จ: ${receiptId || '—'}</span>
+    <span>วันที่จ่ายยา: ${receiptDate || '—'}</span>
+  </div>
+</div>
+<script>window.onload=()=>{window.print();}<\/script>
+</body></html>`);
+  win.document.close();
+};
+
 // ===================== INITIAL DATA =====================
 
 const SAMPLE_PATIENTS = [
@@ -4123,7 +4168,10 @@ function ReceiptPaymentPanel({r,pat,updateReceipt,deleteReceipt,onDeleted,onUpda
             <tbody>
               {items.map((it,i)=>(
                 <tr key={i} style={{background:i%2===0?'#fff':'#fdf6e8'}}>
-                  <td style={{padding:'5px 8px'}}>{it.type==='drug'?'💊 ':'🏥 '}{it.desc}</td>
+                  <td style={{padding:'5px 8px'}}>
+                    {it.type==='drug'?'💊 ':'🏥 '}{it.desc}
+                    {it.type==='drug'&&<button className="btn no-print" onClick={()=>printMedLabel(it,r.patname,r.id,r.date)} style={{fontSize:10,padding:'1px 7px',marginLeft:6,background:'#2980b9',color:'#fff',border:'none',borderRadius:4,cursor:'pointer'}}>🏷️ ฉลาก</button>}
+                  </td>
                   <td style={{padding:'5px 8px',textAlign:'center'}}>
                     <input type="number" value={it.qty} onChange={e=>updItem(i,'qty',e.target.value)} style={{width:50,textAlign:'center',fontSize:11,padding:'2px 4px'}} />
                   </td>
@@ -4297,7 +4345,10 @@ function ReceiptDoc({r,pat,deleteReceipt,onDeleted}) {
           )}
           {drugItems.map((it,i)=>(
             <tr key={'d'+i} style={{background:i%2===0?'#f5faff':'#eef5ff'}}>
-              <td style={{padding:'6px 10px'}}>{it.desc}</td>
+              <td style={{padding:'6px 10px'}}>
+                {it.desc}
+                <button className="no-print" onClick={()=>printMedLabel(it,pat?.prefix+(pat?.fname||r.patname||'')+(pat?.lname?(' '+pat.lname):''),r.id,r.date)} style={{fontSize:10,padding:'1px 7px',marginLeft:7,background:'#2980b9',color:'#fff',border:'none',borderRadius:4,cursor:'pointer',verticalAlign:'middle'}}>🏷️ ฉลาก</button>
+              </td>
               <td style={{padding:'6px 10px',textAlign:'center'}}>{it.qty}</td>
               <td style={{padding:'6px 10px'}}>{it.unit}</td>
               <td style={{padding:'6px 10px',textAlign:'right'}}>{(it.price||0).toLocaleString()}</td>
@@ -4307,7 +4358,10 @@ function ReceiptDoc({r,pat,deleteReceipt,onDeleted}) {
           {/* Legacy rows without type */}
           {r.items.filter(i=>!i.type).map((it,i)=>(
             <tr key={'l'+i} style={{background:i%2===0?'#fff':'var(--gray-pale)'}}>
-              <td style={{padding:'6px 10px'}}>{it.desc}</td>
+              <td style={{padding:'6px 10px'}}>
+                {it.desc}
+                <button className="no-print" onClick={()=>printMedLabel(it,pat?.prefix+(pat?.fname||r.patname||'')+(pat?.lname?(' '+pat.lname):''),r.id,r.date)} style={{fontSize:10,padding:'1px 7px',marginLeft:7,background:'#7f8c8d',color:'#fff',border:'none',borderRadius:4,cursor:'pointer',verticalAlign:'middle'}}>🏷️ ฉลาก</button>
+              </td>
               <td style={{padding:'6px 10px',textAlign:'center'}}>{it.qty}</td>
               <td style={{padding:'6px 10px'}}>{it.unit}</td>
               <td style={{padding:'6px 10px',textAlign:'right'}}>{(it.price||0).toLocaleString()}</td>
@@ -4334,8 +4388,14 @@ function ReceiptDoc({r,pat,deleteReceipt,onDeleted}) {
       <div style={{borderTop:'1px dashed #ccc',paddingTop:10,fontSize:11,color:'var(--gray)',textAlign:'center'}}>
         {CLINIC_NAME} — {CLINIC_ADDRESS} — โทร. {CLINIC_TEL}
       </div>
-      <div style={{textAlign:'center',marginTop:14,display:'flex',gap:8,justifyContent:'center'}} className="no-print">
+      <div style={{textAlign:'center',marginTop:14,display:'flex',gap:8,justifyContent:'center',flexWrap:'wrap'}} className="no-print">
         <button className="btn btn-print btn-sm" onClick={()=>doPrint(docId,'ใบเสร็จรับเงิน เลขที่ '+r.id)}>🖨️ พิมพ์ใบเสร็จ</button>
+        {drugItems.length>0&&(
+          <button className="btn btn-sm" style={{background:'#2980b9',color:'#fff'}}
+            onClick={()=>drugItems.forEach(it=>printMedLabel(it,pat?.prefix+(pat?.fname||r.patname||'')+(pat?.lname?(' '+pat.lname):''),r.id,r.date))}>
+            🏷️ พิมพ์ฉลากยาทั้งหมด ({drugItems.length})
+          </button>
+        )}
         {deleteReceipt && (
           <button
             className="btn btn-danger btn-sm"
