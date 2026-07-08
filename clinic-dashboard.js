@@ -57,7 +57,15 @@ function addAuditEntry(entry) {
 const DRUG_TEMPLATES_KEY = 'clinic_drug_templates_v1';
 const loadDrugTemplates = () => {
     try {
-        return JSON.parse(localStorage.getItem(DRUG_TEMPLATES_KEY) || '[]');
+        const raw = localStorage.getItem(DRUG_TEMPLATES_KEY);
+        // First-ever load on this device (key never set) → seed the 20 built-in
+        // templates. If the person has since deleted all templates on purpose,
+        // raw will be '[]' (not null) and we leave that choice alone.
+        if (raw === null) {
+            saveDrugTemplates(DEFAULT_DRUG_TEMPLATES);
+            return DEFAULT_DRUG_TEMPLATES;
+        }
+        return JSON.parse(raw || '[]');
     }
     catch (_) {
         return [];
@@ -806,6 +814,47 @@ const SAMPLE_MEDICINES = [
     { id: 'M016', name: 'Alcohol 70%', unit: 'ขวด 500ml', stock: 20, price: 60, cost: 35, expire: '2027-03-31', category: 'เวชภัณฑ์', minstock: 5 },
     { id: 'M017', name: 'Ibuprofen 400mg', unit: 'เม็ด', stock: 200, price: 5, cost: 2, expire: '2026-11-30', category: 'ยาแก้ปวด/ลดไข้', minstock: 60 },
     { id: 'M018', name: 'Diclofenac 50mg', unit: 'เม็ด', stock: 150, price: 6, cost: 2.5, expire: '2026-10-31', category: 'ยาแก้ปวด/ลดไข้', minstock: 50 },
+    // ── Added for treatment-template medication set (20 templates, see DEFAULT_DRUG_TEMPLATES below)
+    { id: 'M019', name: 'Chlorpheniramine (CPM) 4mg', unit: 'เม็ด', stock: 10, price: 1, cost: 0.5, expire: '2028-12-31', category: 'ยาแก้แพ้', minstock: 3 },
+    { id: 'M020', name: 'Chlorpheniramine syrup', unit: 'ขวด', stock: 10, price: 30, cost: 15, expire: '2028-12-31', category: 'ยาแก้แพ้', minstock: 3 },
+    { id: 'M021', name: 'N-Acetylcysteine 200mg', unit: 'ซอง', stock: 10, price: 5, cost: 2.5, expire: '2028-12-31', category: 'ยาแก้ไอ/ขับเสมหะ', minstock: 3 },
+    { id: 'M022', name: 'NSS 0.9% 5mL (nasal drops)', unit: 'ขวด', stock: 10, price: 10, cost: 5, expire: '2028-12-31', category: 'ยาหู ตา คอ จมูก', minstock: 3 },
+    { id: 'M023', name: 'Oseltamivir 75mg', unit: 'แคปซูล', stock: 10, price: 45, cost: 25, expire: '2028-12-31', category: 'ยาต้านไวรัส', minstock: 3 },
+    { id: 'M024', name: 'Oseltamivir 45mg/tsp syrup', unit: 'ขวด', stock: 10, price: 350, cost: 200, expire: '2028-12-31', category: 'ยาต้านไวรัส', minstock: 3 },
+    { id: 'M025', name: 'Paracetamol syrup', unit: 'ขวด', stock: 10, price: 40, cost: 20, expire: '2028-12-31', category: 'ยาแก้ปวด/ลดไข้', minstock: 3 },
+    { id: 'M026', name: 'Glyceryl Guaiacolate syrup', unit: 'ขวด', stock: 10, price: 45, cost: 25, expire: '2028-12-31', category: 'ยาแก้ไอ/ขับเสมหะ', minstock: 3 },
+    { id: 'M027', name: 'Glyceryl Guaiacolate 100mg', unit: 'เม็ด', stock: 10, price: 2, cost: 1, expire: '2028-12-31', category: 'ยาแก้ไอ/ขับเสมหะ', minstock: 3 },
+    { id: 'M028', name: 'Dextromethorphan 15mg', unit: 'เม็ด', stock: 10, price: 2, cost: 1, expire: '2028-12-31', category: 'ยาแก้ไอ/ขับเสมหะ', minstock: 3 },
+    { id: 'M029', name: 'Bromhexine hydrochloride syrup', unit: 'ขวด', stock: 10, price: 45, cost: 25, expire: '2028-12-31', category: 'ยาแก้ไอ/ขับเสมหะ', minstock: 3 },
+    { id: 'M030', name: 'Salbutamol 2mg', unit: 'เม็ด', stock: 10, price: 2, cost: 1, expire: '2028-12-31', category: 'ยาขยายหลอดลม', minstock: 3 },
+    { id: 'M031', name: 'Hyoscine 10mg', unit: 'เม็ด', stock: 10, price: 3, cost: 1.5, expire: '2028-12-31', category: 'ยาระบบทางเดินอาหาร', minstock: 3 },
+    { id: 'M032', name: 'Norfloxacin 400mg', unit: 'เม็ด', stock: 10, price: 8, cost: 4, expire: '2028-12-31', category: 'ยาปฏิชีวนะ', minstock: 3 },
+    { id: 'M033', name: 'ORS 5g', unit: 'ซอง', stock: 10, price: 5, cost: 2.5, expire: '2028-12-31', category: 'สารน้ำ/เกลือแร่', minstock: 3 },
+    { id: 'M034', name: 'Ofloxacin 400mg', unit: 'เม็ด', stock: 10, price: 10, cost: 5, expire: '2028-12-31', category: 'ยาปฏิชีวนะ', minstock: 3 },
+    { id: 'M035', name: 'Ceftriaxone 2g injection', unit: 'ขวด', stock: 10, price: 180, cost: 100, expire: '2028-12-31', category: 'ยาปฏิชีวนะ', minstock: 3 },
+    { id: 'M036', name: 'Dimenhydrinate 50mg', unit: 'เม็ด', stock: 10, price: 2, cost: 1, expire: '2028-12-31', category: 'ยาเวียนศีรษะ/คลื่นไส้', minstock: 3 },
+    { id: 'M037', name: 'Betahistine 6mg', unit: 'เม็ด', stock: 10, price: 3, cost: 1.5, expire: '2028-12-31', category: 'ยาเวียนศีรษะ/คลื่นไส้', minstock: 3 },
+    { id: 'M038', name: 'Metoclopramide 10mg', unit: 'เม็ด', stock: 10, price: 2, cost: 1, expire: '2028-12-31', category: 'ยาเวียนศีรษะ/คลื่นไส้', minstock: 3 },
+    { id: 'M039', name: 'Dimenhydrinate 50mg injection', unit: 'หลอด', stock: 10, price: 15, cost: 8, expire: '2028-12-31', category: 'ยาเวียนศีรษะ/คลื่นไส้', minstock: 3 },
+    { id: 'M040', name: 'Metoclopramide 10mg injection', unit: 'หลอด', stock: 10, price: 15, cost: 8, expire: '2028-12-31', category: 'ยาเวียนศีรษะ/คลื่นไส้', minstock: 3 },
+    { id: 'M041', name: 'Aluminum Hydroxide+Magnesium Hydroxide+Simethicone susp 240mL', unit: 'ขวด', stock: 10, price: 55, cost: 30, expire: '2028-12-31', category: 'ยาระบบทางเดินอาหาร', minstock: 3 },
+    { id: 'M042', name: 'Carminative Mixture', unit: 'ขวด', stock: 10, price: 40, cost: 20, expire: '2028-12-31', category: 'ยาระบบทางเดินอาหาร', minstock: 3 },
+    { id: 'M043', name: 'Flupentixol 0.5mg/Melitracen 10mg', unit: 'เม็ด', stock: 10, price: 15, cost: 8, expire: '2028-12-31', category: 'ยาจิตเวช/คลายกังวล', minstock: 3 },
+    { id: 'M044', name: 'Scheriproct suppository', unit: 'แท่ง', stock: 10, price: 25, cost: 13, expire: '2028-12-31', category: 'ยาใช้ภายนอก', minstock: 3 },
+    { id: 'M045', name: 'Senna 7.5mg', unit: 'เม็ด', stock: 10, price: 2, cost: 1, expire: '2028-12-31', category: 'ยาระบบทางเดินอาหาร', minstock: 3 },
+    { id: 'M046', name: 'Petch Sangkhat (Cissus quadrangularis)', unit: 'แคปซูล', stock: 10, price: 3, cost: 1.5, expire: '2028-12-31', category: 'ผลิตภัณฑ์เสริม/สมุนไพร', minstock: 3 },
+    { id: 'M047', name: 'Acyclovir 400mg', unit: 'เม็ด', stock: 10, price: 8, cost: 4, expire: '2028-12-31', category: 'ยาต้านไวรัส', minstock: 3 },
+    { id: 'M048', name: 'Acyclovir cream 5%', unit: 'หลอด', stock: 10, price: 45, cost: 22, expire: '2028-12-31', category: 'ยาต้านไวรัส', minstock: 3 },
+    { id: 'M049', name: 'Dicloxacillin 250mg', unit: 'แคปซูล', stock: 10, price: 5, cost: 2.5, expire: '2028-12-31', category: 'ยาปฏิชีวนะ', minstock: 3 },
+    { id: 'M050', name: 'Poly-Oph eye drops', unit: 'ขวด', stock: 10, price: 35, cost: 18, expire: '2028-12-31', category: 'ยาหู ตา คอ จมูก', minstock: 3 },
+    { id: 'M051', name: 'Balm', unit: 'กระปุก', stock: 10, price: 35, cost: 18, expire: '2028-12-31', category: 'ยาใช้ภายนอก', minstock: 3 },
+    { id: 'M052', name: 'Tramadol 50mg', unit: 'เม็ด', stock: 10, price: 5, cost: 2.5, expire: '2028-12-31', category: 'ยาแก้ปวด/ลดไข้', minstock: 3 },
+    { id: 'M053', name: 'Tramadol 50mg injection', unit: 'หลอด', stock: 10, price: 20, cost: 10, expire: '2028-12-31', category: 'ยาแก้ปวด/ลดไข้', minstock: 3 },
+    { id: 'M054', name: 'Doxycycline 100mg', unit: 'เม็ด', stock: 10, price: 5, cost: 2.5, expire: '2028-12-31', category: 'ยาปฏิชีวนะ', minstock: 3 },
+    { id: 'M055', name: 'Metronidazole 200mg', unit: 'เม็ด', stock: 10, price: 3, cost: 1.5, expire: '2028-12-31', category: 'ยาปฏิชีวนะ', minstock: 3 },
+    { id: 'M056', name: 'Chlorpheniramine 10mg injection', unit: 'หลอด', stock: 10, price: 12, cost: 6, expire: '2028-12-31', category: 'ยาแก้แพ้', minstock: 3 },
+    { id: 'M057', name: 'Dexamethasone 4mg injection', unit: 'หลอด', stock: 10, price: 15, cost: 7, expire: '2028-12-31', category: 'ยาสเตียรอยด์', minstock: 3 },
+    { id: 'M058', name: 'Prednisolone 5mg', unit: 'เม็ด', stock: 10, price: 2, cost: 1, expire: '2028-12-31', category: 'ยาสเตียรอยด์', minstock: 3 },
 ];
 const SAMPLE_EXPENSES = [
     { id: 'X001', date: '2025-06-01', category: 'เวชภัณฑ์/ยา', desc: 'ซื้อยา Paracetamol 500mg x1000 เม็ด', amount: 1000 },
@@ -829,6 +878,31 @@ const SAMPLE_SERVICES = [
     { id: 'S012', name: 'ค่าตรวจ Rapid Antigen Test', category: 'ค่าตรวจพิเศษ', price: 200, unit: 'ครั้ง', active: true },
     { id: 'S013', name: 'ค่าออกใบรับรองแพทย์', category: 'เอกสาร', price: 100, unit: 'ฉบับ', active: true },
     { id: 'S014', name: 'ค่าบริการอื่นๆ', category: 'อื่นๆ', price: 0, unit: 'ครั้ง', active: true },
+];
+// ── Built-in treatment templates (20 common conditions) — seeded into
+// localStorage on first run by loadDrugTemplates() below. medId values
+// reference SAMPLE_MEDICINES / the live `medicines` table by id.
+const DEFAULT_DRUG_TEMPLATES = [
+    { id: 'TPL01', name: 'ไข้หวัด (Common Cold)', note: '', medicines: [{ medId: 'M019', name: 'Chlorpheniramine (CPM) 4mg', qty: 10, unit: 'เม็ด', price: 1, freq: 'รับประทาน 1 เม็ด วันละ 3 ครั้ง หลังอาหาร' }, { medId: 'M021', name: 'N-Acetylcysteine 200mg', qty: 10, unit: 'ซอง', price: 5, freq: 'ละลายน้ำ รับประทาน 1 ซอง วันละ 3 ครั้ง หลังอาหาร' }, { medId: 'M022', name: 'NSS 0.9% 5mL (nasal drops)', qty: 1, unit: 'ขวด', price: 10, freq: 'หยดจมูกข้างละ 2-3 หยด เมื่อมีอาการคัดจมูก' }, { medId: 'M023', name: 'Oseltamivir 75mg', qty: 10, unit: 'แคปซูล', price: 45, freq: 'รับประทาน 1 แคปซูล วันละ 2 ครั้ง หลังอาหาร' }, { medId: 'M001', name: 'Paracetamol 500mg', qty: 10, unit: 'เม็ด', price: 2, freq: 'รับประทาน 1 เม็ด เมื่อมีอาการปวดหรือมีไข้ ทุก 4-6 ชั่วโมง' }] },
+    { id: 'TPL02', name: 'ไข้หวัด เด็ก (Common Cold - Pediatric)', note: '', medicines: [{ medId: 'M020', name: 'Chlorpheniramine syrup', qty: 1, unit: 'ขวด', price: 30, freq: 'รับประทาน 1 ช้อนชา วันละ 3 ครั้ง' }, { medId: 'M026', name: 'Glyceryl Guaiacolate syrup', qty: 1, unit: 'ขวด', price: 45, freq: 'รับประทาน 1 ช้อนชา วันละ 3 ครั้ง' }, { medId: 'M022', name: 'NSS 0.9% 5mL (nasal drops)', qty: 1, unit: 'ขวด', price: 10, freq: 'หยดจมูกข้างละ 2-3 หยด เมื่อมีอาการคัดจมูก' }, { medId: 'M024', name: 'Oseltamivir 45mg/tsp syrup', qty: 1, unit: 'ขวด', price: 350, freq: 'รับประทาน 1 ช้อนชา วันละ 2 ครั้ง หลังอาหาร' }, { medId: 'M025', name: 'Paracetamol syrup', qty: 1, unit: 'ขวด', price: 40, freq: 'รับประทาน 2 ช้อนชา ทุก 4-6 ชั่วโมง เมื่อมีไข้' }] },
+    { id: 'TPL03', name: 'หลอดลมอักเสบ (Bronchitis)', note: '', medicines: [{ medId: 'M028', name: 'Dextromethorphan 15mg', qty: 10, unit: 'เม็ด', price: 2, freq: 'รับประทาน 1 เม็ด วันละ 3 ครั้ง หลังอาหาร' }, { medId: 'M027', name: 'Glyceryl Guaiacolate 100mg', qty: 10, unit: 'เม็ด', price: 2, freq: 'รับประทาน 1 เม็ด วันละ 3 ครั้ง หลังอาหาร' }, { medId: 'M029', name: 'Bromhexine hydrochloride syrup', qty: 10, unit: 'ขวด', price: 45, freq: 'จิบเมื่อมีอาการไอ' }, { medId: 'M030', name: 'Salbutamol 2mg', qty: 10, unit: 'เม็ด', price: 2, freq: 'รับประทาน 1 เม็ด วันละ 3 ครั้ง หลังอาหาร' }, { medId: 'M001', name: 'Paracetamol 500mg', qty: 10, unit: 'เม็ด', price: 2, freq: 'รับประทาน 1 เม็ด เมื่อมีอาการปวดหรือมีไข้ ทุก 4-6 ชั่วโมง' }] },
+    { id: 'TPL04', name: 'ท้องเสีย (Diarrhea)', note: '', medicines: [{ medId: 'M014', name: 'Domperidone 10mg', qty: 10, unit: 'เม็ด', price: 8, freq: 'รับประทาน 1 เม็ด วันละ 3 ครั้ง ก่อนอาหาร' }, { medId: 'M031', name: 'Hyoscine 10mg', qty: 10, unit: 'เม็ด', price: 3, freq: 'รับประทาน 1 เม็ด วันละ 3 ครั้ง หลังอาหาร' }, { medId: 'M032', name: 'Norfloxacin 400mg', qty: 10, unit: 'เม็ด', price: 8, freq: 'รับประทาน 1 เม็ด วันละ 2 ครั้ง หลังอาหาร' }, { medId: 'M033', name: 'ORS 5g', qty: 10, unit: 'ซอง', price: 5, freq: 'ละลายน้ำ จิบได้บ่อยตามต้องการ' }, { medId: 'M001', name: 'Paracetamol 500mg', qty: 10, unit: 'เม็ด', price: 2, freq: 'รับประทาน 1 เม็ด เมื่อมีอาการปวดหรือมีไข้ ทุก 4-6 ชั่วโมง' }] },
+    { id: 'TPL05', name: 'กระเพาะปัสสาวะอักเสบ (UTI)', note: '', medicines: [{ medId: 'M031', name: 'Hyoscine 10mg', qty: 10, unit: 'เม็ด', price: 3, freq: 'รับประทาน 1 เม็ด วันละ 3 ครั้ง หลังอาหาร' }, { medId: 'M034', name: 'Ofloxacin 400mg', qty: 10, unit: 'เม็ด', price: 10, freq: 'รับประทาน 1 เม็ด วันละ 2 ครั้ง หลังอาหาร' }, { medId: 'M001', name: 'Paracetamol 500mg', qty: 10, unit: 'เม็ด', price: 2, freq: 'รับประทาน 1 เม็ด เมื่อมีอาการปวดหรือมีไข้ ทุก 4-6 ชั่วโมง' }] },
+    { id: 'TPL06', name: 'ไข้ ให้ยาฉีด (Fever - IV)', note: '', medicines: [{ medId: 'M035', name: 'Ceftriaxone 2g injection', qty: 10, unit: 'ขวด', price: 180, freq: 'ฉีดเข้าหลอดเลือดดำ (IV) ตามแผนการรักษา' }, { medId: 'M001', name: 'Paracetamol 500mg', qty: 10, unit: 'เม็ด', price: 2, freq: 'รับประทาน 1 เม็ด เมื่อมีอาการปวดหรือมีไข้ ทุก 4-6 ชั่วโมง' }] },
+    { id: 'TPL07', name: 'เวียนศีรษะ (Dizziness)', note: '', medicines: [{ medId: 'M036', name: 'Dimenhydrinate 50mg', qty: 10, unit: 'เม็ด', price: 2, freq: 'รับประทาน 1 เม็ด วันละ 3 ครั้ง หลังอาหาร' }, { medId: 'M037', name: 'Betahistine 6mg', qty: 10, unit: 'เม็ด', price: 3, freq: 'รับประทาน 1 เม็ด วันละ 3 ครั้ง หลังอาหาร' }, { medId: 'M038', name: 'Metoclopramide 10mg', qty: 10, unit: 'เม็ด', price: 2, freq: 'รับประทาน 1 เม็ด วันละ 3 ครั้ง ก่อนอาหาร' }] },
+    { id: 'TPL08', name: 'เวียนศีรษะ ให้ยาฉีด (Dizziness - IV)', note: '', medicines: [{ medId: 'M039', name: 'Dimenhydrinate 50mg injection', qty: 10, unit: 'หลอด', price: 15, freq: 'ฉีดเข้าหลอดเลือดดำ (IV) ตามแผนการรักษา' }, { medId: 'M040', name: 'Metoclopramide 10mg injection', qty: 10, unit: 'หลอด', price: 15, freq: 'ฉีดเข้าหลอดเลือดดำ (IV) ตามแผนการรักษา' }] },
+    { id: 'TPL09', name: 'ท้องอืด อาหารไม่ย่อย (Dyspepsia)', note: '', medicines: [{ medId: 'M008', name: 'Omeprazole 20mg', qty: 10, unit: 'แคปซูล', price: 12, freq: 'รับประทาน 1 แคปซูล วันละ 1 ครั้ง ก่อนอาหารเช้า' }, { medId: 'M041', name: 'Aluminum Hydroxide+Magnesium Hydroxide+Simethicone susp 240mL', qty: 10, unit: 'ขวด', price: 55, freq: 'รับประทานครั้งละ 2 ช้อนโต๊ะ วันละ 3 ครั้ง หลังอาหาร' }, { medId: 'M042', name: 'Carminative Mixture', qty: 10, unit: 'ขวด', price: 40, freq: 'รับประทานครั้งละ 2 ช้อนโต๊ะ วันละ 3 ครั้ง หลังอาหาร' }, { medId: 'M014', name: 'Domperidone 10mg', qty: 10, unit: 'เม็ด', price: 8, freq: 'รับประทาน 1 เม็ด วันละ 3 ครั้ง ก่อนอาหาร' }] },
+    { id: 'TPL10', name: 'ท้องอืดร่วมกับวิตกกังวล (Dyspepsia with Anxiety)', note: '', medicines: [{ medId: 'M043', name: 'Flupentixol 0.5mg/Melitracen 10mg', qty: 10, unit: 'เม็ด', price: 15, freq: 'รับประทาน 1 เม็ด วันละ 1 ครั้ง หลังอาหารเช้า' }] },
+    { id: 'TPL11', name: 'ริดสีดวงทวาร (Hemorrhoid)', note: '', medicines: [{ medId: 'M044', name: 'Scheriproct suppository', qty: 10, unit: 'แท่ง', price: 25, freq: 'เหน็บทวารหนัก 1 แท่ง ก่อนนอน' }, { medId: 'M045', name: 'Senna 7.5mg', qty: 10, unit: 'เม็ด', price: 2, freq: 'รับประทาน 1 เม็ด ก่อนนอน' }, { medId: 'M046', name: 'Petch Sangkhat (Cissus quadrangularis)', qty: 10, unit: 'แคปซูล', price: 3, freq: 'รับประทานครั้งละ 3 แคปซูล วันละ 3 ครั้ง หลังอาหาร' }] },
+    { id: 'TPL12', name: 'เริม (Herpes)', note: '', medicines: [{ medId: 'M047', name: 'Acyclovir 400mg', qty: 10, unit: 'เม็ด', price: 8, freq: 'รับประทาน 1 เม็ด วันละ 5 ครั้ง เวลา 06:00, 10:00, 14:00, 18:00, 22:00 น.' }, { medId: 'M048', name: 'Acyclovir cream 5%', qty: 10, unit: 'หลอด', price: 45, freq: 'ทาบริเวณที่มีอาการ วันละ 5 ครั้ง' }] },
+    { id: 'TPL13', name: 'กุ้งยิง (Hordeolum)', note: '', medicines: [{ medId: 'M049', name: 'Dicloxacillin 250mg', qty: 10, unit: 'แคปซูล', price: 5, freq: 'รับประทาน 1 แคปซูล วันละ 4 ครั้ง ก่อนอาหารและก่อนนอน' }, { medId: 'M050', name: 'Poly-Oph eye drops', qty: 10, unit: 'ขวด', price: 35, freq: 'หยอดตาข้างที่มีอาการ 1-2 หยด วันละ 3 ครั้ง' }, { medId: 'M001', name: 'Paracetamol 500mg', qty: 10, unit: 'เม็ด', price: 2, freq: 'รับประทาน 1 เม็ด เมื่อมีอาการปวดหรือมีไข้ ทุก 4-6 ชั่วโมง' }] },
+    { id: 'TPL14', name: 'ปวดหลังส่วนล่าง (Low Back Pain)', note: '', medicines: [{ medId: 'M017', name: 'Ibuprofen 400mg', qty: 10, unit: 'เม็ด', price: 5, freq: 'รับประทาน 1 เม็ด วันละ 3 ครั้ง หลังอาหาร' }, { medId: 'M001', name: 'Paracetamol 500mg', qty: 10, unit: 'เม็ด', price: 2, freq: 'รับประทาน 1 เม็ด เมื่อมีอาการปวดหรือมีไข้ ทุก 4-6 ชั่วโมง' }, { medId: 'M051', name: 'Balm', qty: 10, unit: 'กระปุก', price: 35, freq: 'ทาบริเวณที่ปวด เมื่อมีอาการ' }] },
+    { id: 'TPL15', name: 'โรคกระดูกสันหลังเสื่อม (Spondylosis)', note: '', medicines: [{ medId: 'M052', name: 'Tramadol 50mg', qty: 10, unit: 'เม็ด', price: 5, freq: 'รับประทาน 1 เม็ด วันละ 3 ครั้ง หลังอาหาร' }, { medId: 'M001', name: 'Paracetamol 500mg', qty: 10, unit: 'เม็ด', price: 2, freq: 'รับประทาน 1 เม็ด เมื่อมีอาการปวดหรือมีไข้ ทุก 4-6 ชั่วโมง' }, { medId: 'M051', name: 'Balm', qty: 10, unit: 'กระปุก', price: 35, freq: 'ทาบริเวณที่ปวด เมื่อมีอาการ' }] },
+    { id: 'TPL16', name: 'ปวด ให้ยาฉีด (Pain - IV)', note: '', medicines: [{ medId: 'M053', name: 'Tramadol 50mg injection', qty: 10, unit: 'หลอด', price: 20, freq: 'ฉีดเข้าหลอดเลือดดำ (IV) ตามแผนการรักษา' }, { medId: 'M040', name: 'Metoclopramide 10mg injection', qty: 10, unit: 'หลอด', price: 15, freq: 'ฉีดเข้าหลอดเลือดดำ (IV) ตามแผนการรักษา' }] },
+    { id: 'TPL17', name: 'ตกขาว (Leukorrhea)', note: '', medicines: [{ medId: 'M054', name: 'Doxycycline 100mg', qty: 10, unit: 'เม็ด', price: 5, freq: 'รับประทาน 1 เม็ด วันละ 2 ครั้ง' }, { medId: 'M055', name: 'Metronidazole 200mg', qty: 10, unit: 'เม็ด', price: 3, freq: 'รับประทานครั้งละ 2 เม็ด วันละ 3 ครั้ง' }] },
+    { id: 'TPL18', name: 'ทอนซิลอักเสบ (Tonsillitis)', note: '', medicines: [{ medId: 'M003', name: 'Amoxicillin 500mg', qty: 10, unit: 'แคปซูล', price: 8, freq: 'รับประทาน 1 แคปซูล วันละ 3 ครั้ง หลังอาหาร' }, { medId: 'M027', name: 'Glyceryl Guaiacolate 100mg', qty: 10, unit: 'เม็ด', price: 2, freq: 'รับประทาน 1 เม็ด วันละ 3 ครั้ง หลังอาหาร' }, { medId: 'M029', name: 'Bromhexine hydrochloride syrup', qty: 10, unit: 'ขวด', price: 45, freq: 'จิบเมื่อมีอาการไอ' }] },
+    { id: 'TPL19', name: 'ลมพิษ ให้ยาฉีด (Urticaria - IV)', note: '', medicines: [{ medId: 'M056', name: 'Chlorpheniramine 10mg injection', qty: 10, unit: 'หลอด', price: 12, freq: 'ฉีดเข้าหลอดเลือดดำ (IV) ตามแผนการรักษา' }, { medId: 'M057', name: 'Dexamethasone 4mg injection', qty: 10, unit: 'หลอด', price: 15, freq: 'ฉีดเข้าหลอดเลือดดำ (IV) ตามแผนการรักษา' }] },
+    { id: 'TPL20', name: 'ลมพิษ (Urticaria)', note: '', medicines: [{ medId: 'M019', name: 'Chlorpheniramine (CPM) 4mg', qty: 10, unit: 'เม็ด', price: 1, freq: 'รับประทาน 1 เม็ด วันละ 3 ครั้ง หลังอาหาร' }, { medId: 'M058', name: 'Prednisolone 5mg', qty: 10, unit: 'เม็ด', price: 2, freq: 'รับประทานครั้งละ 2 เม็ด วันละ 3 ครั้ง หลังอาหาร' }] },
 ];
 // ===================== MAIN APP =====================
 function ClinicDashboard({ session, onLogout }) {
