@@ -58,14 +58,23 @@ const DRUG_TEMPLATES_KEY = 'clinic_drug_templates_v1';
 const loadDrugTemplates = () => {
     try {
         const raw = localStorage.getItem(DRUG_TEMPLATES_KEY);
-        // First-ever load on this device (key never set) → seed the 20 built-in
-        // templates. If the person has since deleted all templates on purpose,
-        // raw will be '[]' (not null) and we leave that choice alone.
-        if (raw === null) {
-            saveDrugTemplates(DEFAULT_DRUG_TEMPLATES);
-            return DEFAULT_DRUG_TEMPLATES;
+        let list = raw ? JSON.parse(raw) : [];
+        if (!Array.isArray(list)) {
+            list = [];
         }
-        return JSON.parse(raw || '[]');
+        // Self-healing seed: on every load, make sure all 20 built-in templates
+        // (TPL01–TPL20) are present by id. Runs regardless of prior localStorage
+        // state (missing key, '[]', or a list that already has custom templates),
+        // so it isn't skipped by leftover state from earlier testing. Never
+        // touches or removes any custom template the person has added.
+        const haveIds = {};
+        list.forEach(t => { haveIds[t.id] = true; });
+        const missing = DEFAULT_DRUG_TEMPLATES.filter(t => !haveIds[t.id]);
+        if (missing.length) {
+            list = list.concat(missing);
+            saveDrugTemplates(list);
+        }
+        return list;
     }
     catch (_) {
         return [];
