@@ -2,7 +2,7 @@ name: Keep Supabase Alive
 
 on:
   schedule:
-    - cron: '0 3 * * 0,3'   # Sunday & Wednesday
+    - cron: '0 3 * * 0,3'
   workflow_dispatch:
 
 jobs:
@@ -11,6 +11,12 @@ jobs:
     steps:
       - name: Ping clinic database
         run: |
-          curl -sf "https://ggshgsyoytrkbnepsryu.supabase.co/rest/v1/patients?select=*&limit=1" \
+          CODE=$(curl -s -o /tmp/out.txt -w "%{http_code}" \
+            --connect-timeout 10 --max-time 30 --retry 3 --retry-delay 5 \
+            "https://${{ secrets.CLINIC_SUPABASE_REF }}.supabase.co/rest/v1/patients?select=id&limit=1" \
             -H "apikey: ${{ secrets.CLINIC_SUPABASE_ANON_KEY }}" \
-            -H "Authorization: Bearer ${{ secrets.CLINIC_SUPABASE_ANON_KEY }}"
+            -H "Authorization: Bearer ${{ secrets.CLINIC_SUPABASE_ANON_KEY }}") || true
+          echo "HTTP status: $CODE"
+          echo "Body: $(cat /tmp/out.txt)"
+          if [ "$CODE" = "540" ]; then echo "::error::Project is PAUSED"; exit 1; fi
+          if [ "$CODE" != "200" ]; then echo "::error::Unexpected status $CODE"; exit 1; fi
