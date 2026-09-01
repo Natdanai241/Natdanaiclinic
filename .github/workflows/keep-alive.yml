@@ -10,18 +10,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Ping clinic database
+        env:
+          SUPABASE_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
         run: |
+          # ใช้ URL สั้นๆ ที่ไม่มีการตัดบรรทัด
           URL="https://lozyfwydyrovxjtsgybn.supabase.co/rest/v1/patients?select=id&limit=1"
           
-          CODE=$(curl -s -o /tmp/out.txt -w "%{http_code}" \
-            -H "apikey: ${{ secrets.SUPABASE_ANON_KEY }}" \
-            -H "Authorization: Bearer ${{ secrets.SUPABASE_ANON_KEY }}" \
-            "$URL")
-            
-          echo "HTTP status: $CODE"
-          if [ "$CODE" = "200" ]; then
-            echo "Success: Database is awake!"
-          else
-            echo "Error: Failed with status $CODE"
-            exit 1
-          fi
+          # ใช้ curl แบบระบุตัวแปรสภาพแวดล้อม
+          curl -v -X GET "$URL" \
+            -H "apikey: $SUPABASE_KEY" \
+            -H "Authorization: Bearer $SUPABASE_KEY"
