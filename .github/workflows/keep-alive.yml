@@ -14,6 +14,6 @@ jobs:
           SUPABASE_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
         run: |
           URL="https://lozyfwydyrovxjtsgybn.supabase.co/rest/v1/patients?select=id&limit=1"
-          curl -v -X GET "$URL" \
+          curl -v "$URL" \
             -H "apikey: $SUPABASE_KEY" \
             -H "Authorization: Bearer $SUPABASE_KEY"
