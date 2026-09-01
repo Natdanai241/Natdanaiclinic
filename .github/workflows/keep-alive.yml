@@ -9,11 +9,15 @@ jobs:
   ping:
     runs-on: ubuntu-latest
     steps:
+      - name: Check DNS resolution
+        run: |
+          getent hosts ggshgsyoytrkbnepsryu.supabase.co || echo "⚠️ DNS lookup failed here too"
+
       - name: Ping clinic database
         env:
           SUPABASE_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
         run: |
-          URL="https://lozyfwydyrovxjtsgybn.supabase.co/rest/v1/patients?select=id&limit=1"
-          curl -v "$URL" \
+          URL="https://ggshgsyoytrkbnepsryu.supabase.co/rest/v1/patients?select=id&limit=1"
+          curl -v --retry 5 --retry-delay 15 --retry-all-errors "$URL" \
             -H "apikey: $SUPABASE_KEY" \
             -H "Authorization: Bearer $SUPABASE_KEY"
