@@ -13,10 +13,7 @@ jobs:
         env:
           SUPABASE_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
         run: |
-          # ใช้ URL สั้นๆ ที่ไม่มีการตัดบรรทัด
           URL="https://lozyfwydyrovxjtsgybn.supabase.co/rest/v1/patients?select=id&limit=1"
-          
-          # ใช้ curl แบบระบุตัวแปรสภาพแวดล้อม
           curl -v -X GET "$URL" \
             -H "apikey: $SUPABASE_KEY" \
             -H "Authorization: Bearer $SUPABASE_KEY"
