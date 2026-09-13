@@ -32,9 +32,13 @@ jobs:
           SUPABASE_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
         run: |
           URL="https://ggshgsyoytrkbnepsryu.supabase.co/rest/v1/patients?select=id&limit=1"
-          curl -v -f --retry 5 --retry-delay 15 --retry-all-errors "$URL" \
+          curl -v -f -X POST "https://ggshgsyoytrkbnepsryu.supabase.co/rest/v1/_keepalive" \
             -H "apikey: $SUPABASE_KEY" \
-            -H "Authorization: Bearer $SUPABASE_KEY"
+            -H "Authorization: Bearer $SUPABASE_KEY" \       
+            -H "Content-Type: application/json" \
+            -H "Prefer: resolution=merge-duplicates" \
+            --retry 5 --retry-delay 15 --retry-all-errors \
+            -d "{\"id\":1,\"pinged_at\":\"$(date -u +%FT%TZ)\"}"
 
       - name: Log run (keeps repo "active" so GitHub never disables the schedule)
         run: |
